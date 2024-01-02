@@ -1,4 +1,36 @@
+const baseConfig =
+{
+  plugins: [
+    "@typescript-eslint",
+    "security",
+    "no-secrets",
+  ],
+  env: {
+    "node" : true
+  },
+  rules: {
+    "no-eval": "error",
+    "no-console": "error",
+    "security/detect-unsafe-regex": "error",
+    "no-secrets/no-secrets": "error",
+    "@dbos-inc/detect-nondeterministic-calls": "error",
+    "@dbos-inc/detect-new-date": "error",
+  }
+};
+
+const extConfig =
+{
+  ...baseConfig,
+  rules: {
+    ...baseConfig.rules,
+  },
+}
+
 module.exports = {
+  meta: {
+    "name": "@dbos-inc/eslint-plugin",
+    "version": "0.0.2",
+  },
   rules: {
     'detect-nondeterministic-calls': {
       // Rule configuration for Math.random() detection
@@ -22,7 +54,7 @@ module.exports = {
                 message: 'Avoid calling Math.random() directly; it can lead to non-reproducible behavior.',
               });
             }
-            if (node.callee.type === 'Identifier' && 
+            if (node.callee.type === 'Identifier' &&
                 node.callee.name === 'setTimeout')
             {
               context.report({
@@ -57,5 +89,12 @@ module.exports = {
       },
     },
   },
+  configs: {
+    dbosBaseConfig: baseConfig,
+    dbosRecommendedConfig: extConfig,
+    dbosExtendedConfig: {
+      ...extConfig,
+    },
+  }
 };
 
