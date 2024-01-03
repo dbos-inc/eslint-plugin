@@ -1,3 +1,7 @@
+const tslintPlugin = require("@typescript-eslint/eslint-plugin");
+const secPlugin = require("eslint-plugin-security");
+const noSecrets = require("eslint-plugin-no-secrets");
+
 const baseConfig =
 {
   plugins: [
@@ -108,6 +112,11 @@ module.exports = {
         };
       },
     },
+  },
+  plugins: {
+    "@typescript-eslint" : tslintPlugin,
+    "security" : secPlugin,
+    "no-secrets" : noSecrets,
   },
   configs: {
     dbosBaseConfig: baseConfig,
