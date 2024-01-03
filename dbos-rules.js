@@ -15,16 +15,36 @@ const baseConfig =
     "no-secrets/no-secrets": "error",
     "@dbos-inc/detect-nondeterministic-calls": "error",
     "@dbos-inc/detect-new-date": "error",
-  }
+  },
+  "extends": [
+  ],
 };
 
-const extConfig =
+const recConfig =
 {
   ...baseConfig,
   rules: {
     ...baseConfig.rules,
   },
+  "extends" : [
+    ...baseConfig.extends,
+    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+  ]
 }
+
+const extConfig =
+{
+  ...recConfig,
+  rules: {
+    ...recConfig.rules,
+  },
+  "extends" : [
+    ...recConfig.extends,
+  ]
+}
+
 
 module.exports = {
   meta: {
@@ -91,10 +111,8 @@ module.exports = {
   },
   configs: {
     dbosBaseConfig: baseConfig,
-    dbosRecommendedConfig: extConfig,
-    dbosExtendedConfig: {
-      ...extConfig,
-    },
+    dbosRecommendedConfig: recConfig,
+    dbosExtendedConfig: extConfig,
   }
 };
 
