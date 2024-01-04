@@ -1,0 +1,49 @@
+const {RuleTester} = require("eslint");
+const ruleUnderTest = require("./dbos-rules.js");
+
+const ruleTester = new RuleTester({
+  parserOptions: { ecmaVersion: 2015 }
+});
+
+// Throws error if the tests in ruleTester.run() do not pass
+ruleTester.run(
+  "detect-nondeterministic-calls", // rule name
+  ruleUnderTest.rules['detect-nondeterministic-calls'], // rule code
+  { // checks
+    // 'valid' checks cases that should pass
+    valid: [{
+      code: "const foo = 'bar';",
+    }],
+    // 'invalid' checks cases that should not pass
+    invalid: [{
+      code: "const foo = Math.random();",
+      //output: 'const foo = *NEED SUGGESTION*;',
+      errors: 1,
+    },
+    {
+      code: "setTimeout(1000).then();",
+      //output: 'const foo = *NEED SUGGESTION*;',
+      errors: 1,
+    }],
+  }
+);
+
+ruleTester.run(
+  "detect-new-date", // rule name
+  ruleUnderTest.rules['detect-new-date'], // rule code
+  { // checks
+    // 'valid' checks cases that should pass
+    valid: [{
+      code: "const foo = 'bar';",
+    }],
+    // 'invalid' checks cases that should not pass
+    invalid: [{
+      code: "const foo = new Date();",
+      //output: 'const foo = *NEED SUGGESTION*;',
+      errors: 1,
+    }],
+  }
+);
+
+
+console.log("All tests passed!");
