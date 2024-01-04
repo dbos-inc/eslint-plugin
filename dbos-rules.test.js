@@ -45,5 +45,27 @@ ruleTester.run(
   }
 );
 
+ruleTester.run(
+  "detect-native-code", // rule name
+  ruleUnderTest.rules['detect-native-code'], // rule code
+  { // checks
+    // 'valid' checks cases that should pass
+    valid: [{
+      code: "const foo = 'bar';",
+    }],
+    // 'invalid' checks cases that should not pass
+    invalid: [{
+      code: "const foo = bcrypt.hash('xxx', 10);",
+      //output: 'const foo = *NEED SUGGESTION*;',
+      errors: 1,
+    }],
+    invalid: [{
+      code: "const foo = bcrypt.compare('xxx', pass);",
+      //output: 'const foo = *NEED SUGGESTION*;',
+      errors: 1,
+    }],
+  }
+);
+
 
 console.log("All tests passed!");

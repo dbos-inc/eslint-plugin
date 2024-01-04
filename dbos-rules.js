@@ -19,6 +19,7 @@ const baseConfig =
     "no-secrets/no-secrets": "error",
     "@dbos-inc/detect-nondeterministic-calls": "error",
     "@dbos-inc/detect-new-date": "error",
+    "@dbos-inc/detect-native-code": "error",
   },
   "extends": [
   ],
@@ -53,9 +54,35 @@ const extConfig =
 module.exports = {
   meta: {
     "name": "@dbos-inc/eslint-plugin",
-    "version": "0.0.2",
+    "version": "0.0.3",
   },
   rules: {
+    'detect-native-code': {
+      // Rule configuration for Math.random() detection
+      meta: {
+        type: 'suggestion',
+        docs: {
+          description: 'Detect calls to nondeterministic functions like Math.random(), which should be called via DBOS rather than directly',
+        },
+        schema: [],
+      },
+      create: function (context) {
+        return {
+          CallExpression(node) {
+            //console.log(node.callee.type+JSON.stringify(node));
+            if (node.callee.type === 'MemberExpression' &&
+                node.callee.object.name === 'bcrypt' &&
+                (node.callee.property.name === 'compare' || node.callee.property.name === 'hash'))
+	    {
+              context.report({
+                node: node,
+                message: "Avoid using the 'bcrypt' library, which contains native code.  Instead, use 'bcryptjs'.  Also, note that some bcrypt functions generate random data and should only be called from DBOS communicators.",
+              });
+            }
+          },
+        };
+      },
+    },
     'detect-nondeterministic-calls': {
       // Rule configuration for Math.random() detection
       meta: {
@@ -72,7 +99,7 @@ module.exports = {
             if (node.callee.type === 'MemberExpression' &&
                 node.callee.object.name === 'Math' &&
                 node.callee.property.name === 'random')
-	          {
+	    {
               context.report({
                 node: node,
                 message: 'Avoid calling Math.random() directly; it can lead to non-reproducible behavior.',
