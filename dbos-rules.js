@@ -54,7 +54,7 @@ const extConfig =
 module.exports = {
   meta: {
     "name": "@dbos-inc/eslint-plugin",
-    "version": "0.0.3",
+    "version": "0.0.4",
   },
   rules: {
     'detect-native-code': {
