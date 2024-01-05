@@ -16,6 +16,7 @@ jobs:
       - name: Compile and Test
         working-directory: ./
         run: |
+          npm install
           npm test
         env:
           NPM_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
