@@ -58,11 +58,11 @@ module.exports = {
   },
   rules: {
     'detect-native-code': {
-      // Rule configuration for Math.random() detection
+      // Rule configuration for detection of libraries based on native code
       meta: {
         type: 'suggestion',
         docs: {
-          description: 'Detect calls to nondeterministic functions like Math.random(), which should be called via DBOS rather than directly',
+          description: 'Detect calls to libraries with native functions like bcrypt, which should be replaced with native JS',
         },
         schema: [],
       },
