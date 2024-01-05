@@ -1,0 +1,22 @@
+name: Test DBOS eslint plugin
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js 18
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Compile and Test
+        working-directory: ./
+        run: |
+          npm test
+        env:
+          NPM_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          SILENCE_LOGS: true
