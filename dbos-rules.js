@@ -28,26 +28,34 @@ const baseConfig =
 const recConfig =
 {
   ...baseConfig,
-  rules: {
-    ...baseConfig.rules,
-  },
   "extends" : [
     ...baseConfig.extends,
     "plugin:@typescript-eslint/recommended-requiring-type-checking",
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended",
-  ]
+  ],
+  rules: {
+    ...baseConfig.rules,
+    "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    "@typescript-eslint/semi": ["error"],
+
+    "@typescript-eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_" }
+    ],
+  },
 }
 
 const extConfig =
 {
   ...recConfig,
+  "extends" : [
+    ...recConfig.extends,
+  ],
   rules: {
     ...recConfig.rules,
   },
-  "extends" : [
-    ...recConfig.extends,
-  ]
 }
 
 
