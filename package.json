@@ -1,6 +1,6 @@
 {
   "name": "@dbos-inc/eslint-plugin",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "eslint plugin for DBOS SDK",
   "license": "MIT",
   "repository": {
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "eslint": "^8.56.0",
-    "eslint-plugin-security": "^1.7.1",
+    "eslint-plugin-security": "^2.1.0",
     "eslint-plugin-no-secrets": "^0.8.9",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.10.0"
