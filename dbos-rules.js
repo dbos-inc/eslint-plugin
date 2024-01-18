@@ -14,6 +14,7 @@ const baseConfig =
   },
   rules: {
     "no-eval": "error",
+    "@typescript-eslint/no-implied-eval": "error",
     "no-console": "error",
     "security/detect-unsafe-regex": "error",
     "no-secrets/no-secrets": "error",
@@ -37,7 +38,13 @@ const recConfig =
   rules: {
     ...baseConfig.rules,
     "@typescript-eslint/no-unnecessary-type-assertion": "off",
-    "@typescript-eslint/semi": ["error"],
+    "semi": ["error"],
+    "no-empty": "off",
+    "no-constant-condition": "off",
+    "@typescript-eslint/no-misused-promises": "error",
+    "@typescript-eslint/no-floating-promises": "error",
+    "eqeqeq": ["error", "always"],
+    "@typescript-eslint/no-for-in-array": "error",
 
     "@typescript-eslint/no-unused-vars": [
       "error",
@@ -55,6 +62,7 @@ const extConfig =
   ],
   rules: {
     ...recConfig.rules,
+    "@typescript-eslint/no-shadow": "error",
   },
 }
 
