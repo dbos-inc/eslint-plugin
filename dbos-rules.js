@@ -70,7 +70,7 @@ const extConfig =
 module.exports = {
   meta: {
     "name": "@dbos-inc/eslint-plugin",
-    "version": "0.0.4",
+    "version": "0.0.6",
   },
   rules: {
     'detect-native-code': {
@@ -92,7 +92,7 @@ module.exports = {
 	    {
               context.report({
                 node: node,
-                message: "Avoid using the 'bcrypt' library, which contains native code.  Instead, use 'bcryptjs'.  Also, note that some bcrypt functions generate random data and should only be called from DBOS communicators.",
+                message: "Avoid using the 'bcrypt' library, which contains native code.  Instead, use 'bcryptjs'.  Also, note that some bcrypt functions generate random data and should only be called from DBOS communicators, such as `@dbos-inc/communicator-bcrypt`.",
               });
             }
           },
@@ -118,7 +118,7 @@ module.exports = {
 	    {
               context.report({
                 node: node,
-                message: 'Avoid calling Math.random() directly; it can lead to non-reproducible behavior.',
+                message: 'Avoid calling Math.random() directly; it can lead to non-reproducible behavior.  See `@dbos-inc/communicator-random`'
               });
             }
             if (node.callee.type === 'Identifier' &&
@@ -148,7 +148,7 @@ module.exports = {
             if (node.callee.name === 'Date') {
               context.report({
                 node: node,
-                message: 'Avoid using new Date(); consider using the DBOS SDK functions for consistency and testability.',
+                message: 'Avoid using new Date(); consider using the DBOS SDK functions or `@dbos-inc/communicator-datetime` for consistency and testability.',
               });
             }
           },
