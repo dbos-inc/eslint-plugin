@@ -10,6 +10,7 @@
   "main": "dbos-rules.ts",
   "homepage": "https://docs.dbos.dev/",
   "scripts": {
+    "build": "tsc",
     "test": "tsc && node dist/dbos-rules.test.js"
   },
   "peerDependencies": {
