@@ -58,12 +58,14 @@ ruleTester.run(
       code: "const foo = bcrypt.hash('xxx', 10);",
       //output: 'const foo = *NEED SUGGESTION*;',
       errors: 1,
-    }],
+    }]
+    /*
     invalid: [{
       code: "const foo = bcrypt.compare('xxx', pass);",
       //output: 'const foo = *NEED SUGGESTION*;',
       errors: 1,
     }],
+    */
   }
 );
 

@@ -7,20 +7,22 @@
     "type": "git",
     "url": "https://github.com/dbos-inc/eslint-plugin"
   },
-  "main": "dbos-rules.js",
+  "main": "dbos-rules.ts",
   "homepage": "https://docs.dbos.dev/",
   "scripts": {
-    "test": "node dbos-rules.test.js"
+    "test": "tsc && node dist/dbos-rules.test.js"
   },
   "peerDependencies": {
     "eslint": ">=8.0.0"
   },
   "dependencies": {
-    "eslint": "^8.56.0",
-    "eslint-plugin-security": "^2.1.0",
-    "eslint-plugin-no-secrets": "^0.8.9",
+    "@types/node": "^20.14.6",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.10.0"
+    "@typescript-eslint/parser": "^6.10.0",
+    "eslint": ">=8.0.0",
+    "eslint-plugin-no-secrets": "^0.8.9",
+    "eslint-plugin-security": "^2.1.0",
+    "typescript": "^5.4.5"
   },
   "keywords": [
     "eslint",

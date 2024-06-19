@@ -82,9 +82,9 @@ module.exports = {
         },
         schema: [],
       },
-      create: function (context) {
+      create: function (context: any) {
         return {
-          CallExpression(node) {
+          CallExpression(node: any) {
             //console.log(node.callee.type+JSON.stringify(node));
             if (node.callee.type === 'MemberExpression' &&
                 node.callee.object.name === 'bcrypt' &&
@@ -108,9 +108,9 @@ module.exports = {
         },
         schema: [],
       },
-      create: function (context) {
+      create: function (context: any) {
         return {
-          CallExpression(node) {
+          CallExpression(node: any) {
             //console.log(node.callee.type+JSON.stringify(node));
             if (node.callee.type === 'MemberExpression' &&
                 node.callee.object.name === 'Math' &&
@@ -142,9 +142,9 @@ module.exports = {
         },
         schema: [],
       },
-      create: function (context) {
+      create: function (context: any) {
         return {
-          NewExpression(node) {
+          NewExpression(node: any) {
             if (node.callee.name === 'Date') {
               context.report({
                 node: node,
@@ -167,4 +167,3 @@ module.exports = {
     dbosExtendedConfig: extConfig,
   }
 };
-
