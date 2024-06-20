@@ -155,7 +155,7 @@ const awaitsOnAllowedType: DetChecker = (node, _fn, _isLocal) => {
     /* If the typename is undefined, there's no associated typename (so possibly a
     variable is being used that was never defined; that error will be handled elsewhere) */
     if (typeName !== undefined && !TYPES_ALLOWED_TO_AWAIT_WITH.has(typeName)) {
-      const allowedAsString = [...TYPES_ALLOWED_TO_AWAIT_WITH].join(", ");
+      const allowedAsString = [...TYPES_ALLOWED_TO_AWAIT_WITH].map((name) => `\`${name}\``).join(", ");
       return `This function should not await with a leftmost value of type \`${typeName}\` (name = \`${expr.print()}\`, allowed types = {${allowedAsString}})`;
     }
   }
