@@ -57,7 +57,9 @@ function makeTsMorphNode(eslintNode: any): Node {
   const compilerNode = globalTools!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
 
   const options = { // TODO: should I pass some compiler options in too, and if so, how?
-    compilerOptions: undefined, sourceFile: compilerNode.getSourceFile(), typeChecker: globalTools!.typeChecker
+    compilerOptions: undefined,
+    sourceFile: compilerNode.getSourceFile(),
+    typeChecker: globalTools!.typeChecker
   };
 
   return createWrappedNode(compilerNode, options);
