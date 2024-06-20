@@ -1,40 +1,294 @@
-const tslintPlugin = require("@typescript-eslint/eslint-plugin");
+import { TypeChecker } from "typescript";
+import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
+import { ESLintUtils, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
+
+import {
+  createWrappedNode, Node, Expression, FunctionDeclaration,
+  ConstructorDeclaration, ClassDeclaration, MethodDeclaration
+} from "ts-morph";
+
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
-const baseConfig =
-{
+//////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
+
+////////// These are some shared types and values used throughout the code
+
+// TODO: support `FunctionExpression` and `ArrowFunction` too
+type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
+
+// This returns `undefined` if there is no error message to emit
+type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
+
+// TODO: stop this globalness (make some class, perhaps, and include some methods with these as internal fields?)
+let globalEslintContext: any | undefined = undefined;
+let globalParserServices: ParserServicesWithTypeInformation | undefined = undefined;
+let globalTypeChecker: TypeChecker | undefined = undefined;
+
+const DETERMINISTIC_DECORATOR_NAMES = new Set(["Workflow", "Transaction"]);
+const TYPES_ALLOWED_TO_AWAIT_WITH = new Set(["WorkflowContext", "TransactionContext"]);
+
+////////// These are some utility functions
+
+// This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost term). This term need not be an identifier.
+function reduceExprToLeftmostTerm(node: Expression): Node {
+  while (Node.isPropertyAccessExpression(node) || Node.isCallExpression(node)) {
+    node = node.getExpression();
+  }
+
+  return node;
+}
+
+function evaluateClassForDeterminism(theClass: ClassDeclaration) {
+  theClass.getConstructors().forEach(evaluateFunctionForDeterminism);
+  theClass.getMethods().forEach(evaluateFunctionForDeterminism);
+}
+
+function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
+  return fnDecl.getModifiers().some((modifier) =>
+    Node.isDecorator(modifier) && DETERMINISTIC_DECORATOR_NAMES.has(modifier.getName())
+  );
+}
+
+// Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
+function makeTsMorphNode(eslintNode: any): Node {
+  const compilerNode = globalParserServices!.esTreeNodeToTSNodeMap.get(eslintNode);
+
+  const options = { // TODO: should I pass some compiler options in too, and if so, how?
+    compilerOptions: undefined, sourceFile: compilerNode.getSourceFile(), typeChecker: globalTypeChecker
+  };
+
+  return createWrappedNode(compilerNode, options);
+}
+
+function makeEslintNode(tsMorphNode: Node): any {
+  const compilerNode = tsMorphNode.compilerNode;
+  return globalParserServices!.tsNodeToESTreeNodeMap.get(compilerNode);
+}
+
+function getTypeForTsMorphNode(tsMorphNode: Node): string {
+  /* We need to use the typechecker to check the type, instead of `expr.getType()`,
+  since type information is lost when creating `ts-morph` nodes from Typescript compiler
+  nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
+  for its AST). */
+
+  const type = globalTypeChecker!.getTypeAtLocation(tsMorphNode.compilerNode);
+  const name = type.getSymbol()?.getName();
+
+  if (name === undefined) {
+    throw new Error("Unable to extract a type from the TSMorph node!");
+  }
+  else {
+    return name;
+  }
+}
+
+////////// These functions are the determinism heuristics that I've written
+
+const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
+  if (Node.isExpressionStatement(node)) {
+    const subexpr = node.getExpression();
+
+    if (Node.isBinaryExpression(subexpr)) {
+      const lhs = reduceExprToLeftmostTerm(subexpr.getLeft());
+
+      if (Node.isIdentifier(lhs) && !isLocal(lhs.getText())) {
+        return "This is a global modification relative to the workflow/transaction declaration.";
+      }
+
+      /* TODO: warn about these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
+      Could I solve that by checking for equals signs, and then a variable, or array with variables in it,
+      on the lefthand side? */
+    }
+  }
+}
+
+/* TODO: should I ban IO functions, like `fetch`, `console.log`,
+and mutating global arrays via functions like `push`, etc.? */
+const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
+  const makeDateMessage = (variantEnd: string) => `Calling \`Date${variantEnd}()\` is banned (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
+
+  const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
+Also, some `bcrypt` functions generate random data and should only be called from communicators"
+
+  const bannedFunctionsWithValidArgCountsAndMessages: Map<string, [Set<number>, string]> = new Map([
+    ["Date",           [new Set([0]),    makeDateMessage("")]], // This covers `new Date()` as well
+    ["Date.now",       [new Set([0]),    makeDateMessage(".now")]],
+    ["Math.random",    [new Set([0]),    "Avoid calling Math.random() directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"]],
+    ["setTimeout",     [new Set([1, 2]), "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"]],
+    ["bcrypt.hash",    [new Set([3]),    bcryptMessage]],
+    ["bcrypt.compare", [new Set([3]),    bcryptMessage]]
+  ]);
+
+  //////////
+
+  if (Node.isCallExpression(node) || Node.isNewExpression(node)) {
+    const text = node.getExpression().getText(); // TODO: make this work for cases like `Math. random()`!
+    const validArgCountsAndMessage = bannedFunctionsWithValidArgCountsAndMessages.get(text);
+
+    if (validArgCountsAndMessage !== undefined) {
+      const [validArgCounts, customMessage] = validArgCountsAndMessage;
+      const argCount = node.getArguments().length;
+
+      if (validArgCounts.has(argCount)) {
+        return customMessage;
+      }
+    }
+  }
+}
+
+const awaitsOnAllowedType: DetChecker = (node, _fn, _isLocal) => {
+  // TODO: match against `.then` as well (with a promise object preceding it)
+  if (Node.isAwaitExpression(node)) {
+    let expr = reduceExprToLeftmostTerm(node.getExpression());
+
+    // In this case, we are awaiting on a literal value, which doesn't make a ton of sense
+    if (!Node.isIdentifier(expr)) {
+     if (!Node.isLiteralExpression(expr)) {
+        throw new Error("Hm, what could this expression be?");
+      }
+      else {
+        return; // Don't check literals
+      }
+    }
+
+    const typeName = getTypeForTsMorphNode(expr);
+
+    if (!TYPES_ALLOWED_TO_AWAIT_WITH.has(typeName)) { // TODO: test this
+      return `This function should not await with a leftmost variable of type \`${typeName}\` (allowed types: ${JSON.stringify(TYPES_ALLOWED_TO_AWAIT_WITH)})`;
+    }
+  }
+}
+
+////////// This is the main function that recurs on the `ts-morph` AST
+
+function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
+  const body = fn.getBody();
+
+  if (body === undefined) {
+    throw new Error("When would a function not have a body?");
+  }
+
+  const stack: Set<string>[] = [new Set()];
+  const getCurrentFrame = () => stack[stack.length - 1];
+  const pushFrame = () => stack.push(new Set());
+  const popFrame = () => stack.pop();
+  const isLocal = (name: string) => stack.some((frame) => frame.has(name));
+
+  const detCheckers: DetChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnAllowedType];
+
+  function checkNodeForGlobalVarUsage(node: Node) {
+    const locals = getCurrentFrame();
+
+    if (Node.isClassDeclaration(node)) {
+      evaluateClassForDeterminism(node);
+      return;
+    }
+    else if (Node.isFunctionDeclaration(node)) { // || Node.isArrowFunction(node)) {
+      /* Not checking if this function should be deterministic
+      strictly, since it might have nondeterministic subfunctions */
+      evaluateFunctionForDeterminism(node);
+      return;
+    }
+    else if (Node.isBlock(node)) {
+      pushFrame();
+      node.forEachChild(checkNodeForGlobalVarUsage);
+      popFrame();
+      return;
+    }
+    else if (Node.isVariableDeclaration(node)) {
+      locals.add(node.getName());
+    }
+    else if (functionShouldBeDeterministic(fn)) {
+
+      detCheckers.forEach((detChecker) => {
+        const maybe_error_string = detChecker(node, fn, isLocal);
+
+        if (maybe_error_string !== undefined) {
+          const correspondingEslintNode = makeEslintNode!(node);
+          globalEslintContext.report({node: correspondingEslintNode, message: maybe_error_string});
+        }
+      });
+
+      // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
+    }
+    else {
+      // console.log("Not accounted for (nondet function)...");
+    }
+
+    node.forEachChild(checkNodeForGlobalVarUsage);
+  }
+
+  body.forEachChild(checkNodeForGlobalVarUsage);
+}
+
+////////// This is the entrypoint for running the determinism analysis with `ts-morph`
+
+export function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContextParam: any) {
+  // TODO: should I really do this global setting? It's pretty nasty...
+  globalEslintContext = eslintContextParam;
+  globalParserServices = ESLintUtils.getParserServices(globalEslintContext);
+  globalTypeChecker = globalParserServices.program.getTypeChecker();
+
+  const tsMorphNode = makeTsMorphNode(estreeNode);
+
+  try {
+    if (Node.isSourceFile(tsMorphNode)) {
+      tsMorphNode.getFunctions().forEach(evaluateFunctionForDeterminism);
+      tsMorphNode.getClasses().forEach(evaluateClassForDeterminism);
+    }
+    else {
+      throw new Error("Was expecting a source file to be passed to `analyzeSourceNodeForDeterminism`!");
+    }
+  }
+  finally {
+    // Not keeping these globals around after failure
+    globalEslintContext = undefined;
+    globalParserServices = undefined;
+    globalTypeChecker = undefined;
+  }
+}
+
+/* Other TODO:
+- Take a look at these functions:
+isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName
+- Check function expressions and arrow functions for mutation (and interfaces?)
+- Check for recursive global mutation for expected-to-be-deterministic functions
+*/
+
+//////////////////////////////////////////////////////////////////////////////////////////////////// Here is the ESLint plugin code (mostly boilerplate):
+
+const baseConfig = {
   plugins: [
     "@typescript-eslint",
     "security",
-    "no-secrets",
+    "no-secrets"
   ],
-  env: {
-    "node" : true
-  },
+
+  env: { "node" : true },
+
   rules: {
     "no-eval": "error",
     "@typescript-eslint/no-implied-eval": "error",
     "no-console": "error",
     "security/detect-unsafe-regex": "error",
     "no-secrets/no-secrets": "error",
-    "@dbos-inc/detect-nondeterministic-calls": "error",
-    "@dbos-inc/detect-new-date": "error",
-    "@dbos-inc/detect-native-code": "error",
+    "@dbos-inc/unexpected-nondeterminism": "error"
   },
-  "extends": [
-  ],
+
+  "extends": []
 };
 
-const recConfig =
-{
+const recConfig = {
   ...baseConfig,
-  "extends" : [
+
+  "extends": [
     ...baseConfig.extends,
     "plugin:@typescript-eslint/recommended-requiring-type-checking",
     "eslint:recommended",
-    "plugin:@typescript-eslint/recommended",
+    "plugin:@typescript-eslint/recommended"
   ],
+
   rules: {
     ...baseConfig.rules,
     "@typescript-eslint/no-unnecessary-type-assertion": "off",
@@ -45,125 +299,57 @@ const recConfig =
     "@typescript-eslint/no-floating-promises": "error",
     "eqeqeq": ["error", "always"],
     "@typescript-eslint/no-for-in-array": "error",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+  }
+};
 
-    "@typescript-eslint/no-unused-vars": [
-      "error",
-      { "argsIgnorePattern": "^_",
-        "varsIgnorePattern": "^_" }
-    ],
-  },
-}
-
-const extConfig =
-{
+const extConfig = {
   ...recConfig,
-  "extends" : [
-    ...recConfig.extends,
-  ],
+
+  "extends" : [...recConfig.extends],
+
   rules: {
     ...recConfig.rules,
-    "@typescript-eslint/no-shadow": "error",
+    "@typescript-eslint/no-shadow": "error"
   },
-}
-
+};
 
 module.exports = {
   meta: {
     "name": "@dbos-inc/eslint-plugin",
     "version": "0.0.7",
   },
+
   rules: {
-    'detect-native-code': {
-      // Rule configuration for detection of libraries based on native code
+    "unexpected-nondeterminism": {
       meta: {
-        type: 'suggestion',
-        docs: {
-          description: 'Detect calls to libraries with native functions like bcrypt, which should be replaced with native JS',
-        },
-        schema: [],
+        type: "suggestion",
+        docs: { description: "Detect nondeterminism in cases where functions should act deterministically" },
+        schema: []
       },
+
       create: function (context: any) {
         return {
-          CallExpression(node: any) {
-            //console.log(node.callee.type+JSON.stringify(node));
-            if (node.callee.type === 'MemberExpression' &&
-                node.callee.object.name === 'bcrypt' &&
-                (node.callee.property.name === 'compare' || node.callee.property.name === 'hash'))
-	    {
-              context.report({
-                node: node,
-                message: "Avoid using the 'bcrypt' library, which contains native code.  Instead, use 'bcryptjs'.  Also, note that some bcrypt functions generate random data and should only be called from DBOS communicators, such as `@dbos-inc/communicator-bcrypt`.",
-              });
-            }
-          },
-        };
-      },
-    },
-    'detect-nondeterministic-calls': {
-      // Rule configuration for Math.random() detection
-      meta: {
-        type: 'suggestion',
-        docs: {
-          description: 'Detect calls to nondeterministic functions like Math.random(), which should be called via DBOS rather than directly',
-        },
-        schema: [],
-      },
-      create: function (context: any) {
-        return {
-          CallExpression(node: any) {
-            //console.log(node.callee.type+JSON.stringify(node));
-            if (node.callee.type === 'MemberExpression' &&
-                node.callee.object.name === 'Math' &&
-                node.callee.property.name === 'random')
-	    {
-              context.report({
-                node: node,
-                message: 'Avoid calling Math.random() directly; it can lead to non-reproducible behavior.  See `@dbos-inc/communicator-random`'
-              });
-            }
-            if (node.callee.type === 'Identifier' &&
-                node.callee.name === 'setTimeout')
-            {
-              context.report({
-                node: node,
-                message: 'Avoid calling setTimeout() directly; it can lead to undesired behavior when debugging.',
-              });
-            }
-          },
-        };
-      },
-    },
-    'detect-new-date': {
-      // Rule configuration for new Date() detection
-      meta: {
-        type: 'suggestion',
-        docs: {
-          description: 'Detect calls to new Date(), which should be called via DBOS rather than directly',
-        },
-        schema: [],
-      },
-      create: function (context: any) {
-        return {
-          NewExpression(node: any) {
-            if (node.callee.name === 'Date') {
-              context.report({
-                node: node,
-                message: 'Avoid using new Date(); consider using the DBOS SDK functions or `@dbos-inc/communicator-datetime` for consistency and testability.',
-              });
-            }
-          },
-        };
-      },
-    },
+          /* Note: I am working with ts-morph because it has
+          stronger typing, and it's easier to work with the AST
+          than ESTree's limited tree navigation. */
+          Program(node: any) {
+            analyzeEstreeNodeForDeterminism(node, context);
+          }
+        }
+      }
+    }
   },
+
   plugins: {
-    "@typescript-eslint" : tslintPlugin,
-    "security" : secPlugin,
-    "no-secrets" : noSecrets,
+    "@typescript-eslint": tslintPlugin,
+    "security": secPlugin,
+    "no-secrets": noSecrets
   },
+
   configs: {
     dbosBaseConfig: baseConfig,
     dbosRecommendedConfig: recConfig,
-    dbosExtendedConfig: extConfig,
+    dbosExtendedConfig: extConfig
   }
 };
