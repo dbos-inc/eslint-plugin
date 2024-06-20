@@ -25,8 +25,9 @@ let globalEslintContext: any | undefined = undefined;
 let globalParserServices: ParserServicesWithTypeInformation | undefined = undefined;
 let globalTypeChecker: TypeChecker | undefined = undefined;
 
-const DETERMINISTIC_DECORATOR_NAMES = new Set(["Workflow", "Transaction"]);
-const TYPES_ALLOWED_TO_AWAIT_WITH = new Set(["WorkflowContext", "TransactionContext"]);
+// These included `Transaction` and `TransactionContext` respectively before!
+const DETERMINISTIC_DECORATORS = new Set(["Workflow"]);
+const TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS = new Set(["WorkflowContext"]);
 
 ////////// These are some utility functions
 
@@ -50,7 +51,7 @@ function evaluateClassForDeterminism(theClass: ClassDeclaration) {
 
 function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
   return fnDecl.getModifiers().some((modifier) =>
-    Node.isDecorator(modifier) && DETERMINISTIC_DECORATOR_NAMES.has(modifier.getName())
+    Node.isDecorator(modifier) && DETERMINISTIC_DECORATORS.has(modifier.getName())
   );
 }
 
@@ -150,12 +151,15 @@ const awaitsOnAllowedType: DetChecker = (node, _fn, _isLocal) => {
       }
     }
 
-    const typeName = getTypeNameForTsMorphNode(expr);
-
     /* If the typename is undefined, there's no associated typename (so possibly a
-    variable is being used that was never defined; that error will be handled elsewhere) */
-    if (typeName !== undefined && !TYPES_ALLOWED_TO_AWAIT_WITH.has(typeName)) {
-      const allowedAsString = [...TYPES_ALLOWED_TO_AWAIT_WITH].map((name) => `\`${name}\``).join(", ");
+    variable is being used that was never defined; that error will be handled elsewhere). */
+    const typeName = getTypeNameForTsMorphNode(expr);
+    if (typeName === undefined) return;
+
+    const validSet = TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS;
+
+    if (!validSet.has(typeName)) {
+      const allowedAsString = [...validSet].map((name) => `\`${name}\``).join(", ");
       return `This function should not await with a leftmost value of type \`${typeName}\` (name = \`${expr.print()}\`, allowed types = {${allowedAsString}})`;
     }
   }
