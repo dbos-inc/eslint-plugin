@@ -20,10 +20,7 @@ type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDec
 // This returns `undefined` if there is no error message to emit
 type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
-// TODO: stop this globalness (make some class, perhaps, and include some methods with these as internal fields?)
-let globalEslintContext: any | undefined = undefined;
-let globalParserServices: ParserServicesWithTypeInformation | undefined = undefined;
-let globalTypeChecker: TypeChecker | undefined = undefined;
+let globalTools: {eslintContext: any, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker} | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
 const DETERMINISTIC_DECORATORS = new Set(["Workflow"]);
@@ -57,10 +54,10 @@ function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
 
 // Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
 function makeTsMorphNode(eslintNode: any): Node {
-  const compilerNode = globalParserServices!.esTreeNodeToTSNodeMap.get(eslintNode);
+  const compilerNode = globalTools!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
 
   const options = { // TODO: should I pass some compiler options in too, and if so, how?
-    compilerOptions: undefined, sourceFile: compilerNode.getSourceFile(), typeChecker: globalTypeChecker
+    compilerOptions: undefined, sourceFile: compilerNode.getSourceFile(), typeChecker: globalTools!.typeChecker
   };
 
   return createWrappedNode(compilerNode, options);
@@ -68,7 +65,7 @@ function makeTsMorphNode(eslintNode: any): Node {
 
 function makeEslintNode(tsMorphNode: Node): any {
   const compilerNode = tsMorphNode.compilerNode;
-  return globalParserServices!.tsNodeToESTreeNodeMap.get(compilerNode);
+  return globalTools!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
 }
 
 // If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
@@ -78,7 +75,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
-  const type = globalTypeChecker!.getTypeAtLocation(tsMorphNode.compilerNode);
+  const type = globalTools!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
   return type.getSymbol()?.getName();
 }
 
@@ -136,7 +133,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   }
 }
 
-const awaitsOnAllowedType: DetChecker = (node, _fn, _isLocal) => {
+const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
   if (Node.isAwaitExpression(node)) {
     let expr = reduceNodeToLeftmostLeaf(node.getExpression());
@@ -180,7 +177,7 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
   const popFrame = () => stack.pop();
   const isLocal = (name: string) => stack.some((frame) => frame.has(name));
 
-  const detCheckers: DetChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnAllowedType];
+  const detCheckers: DetChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
   function checkNodeForGlobalVarUsage(node: Node) {
     const locals = getCurrentFrame();
@@ -211,7 +208,7 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
 
         if (maybe_error_string !== undefined) {
           const correspondingEslintNode = makeEslintNode!(node);
-          globalEslintContext.report({node: correspondingEslintNode, message: maybe_error_string});
+          globalTools!.eslintContext.report({node: correspondingEslintNode, message: maybe_error_string});
         }
       });
 
@@ -229,11 +226,14 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
 
 ////////// This is the entrypoint for running the determinism analysis with `ts-morph`
 
-export function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContextParam: any) {
-  // TODO: should I really do this global setting? It's pretty nasty...
-  globalEslintContext = eslintContextParam;
-  globalParserServices = ESLintUtils.getParserServices(globalEslintContext);
-  globalTypeChecker = globalParserServices.program.getTypeChecker();
+export function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContext: any) {
+  const parserServices = ESLintUtils.getParserServices(eslintContext);
+
+  globalTools = {
+    eslintContext: eslintContext,
+    parserServices: parserServices,
+    typeChecker: parserServices.program.getTypeChecker()
+  };
 
   const tsMorphNode = makeTsMorphNode(estreeNode);
 
@@ -247,10 +247,8 @@ export function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContextPa
     }
   }
   finally {
-    // Not keeping these globals around after failure
-    globalEslintContext = undefined;
-    globalParserServices = undefined;
-    globalTypeChecker = undefined;
+    // Not keeping the tools around after failure
+    globalTools = undefined;
   }
 }
 
