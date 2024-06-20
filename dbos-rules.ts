@@ -3,7 +3,7 @@ import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
 import { ESLintUtils, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 
 import {
-  createWrappedNode, Node, Expression, FunctionDeclaration,
+  createWrappedNode, Node, FunctionDeclaration,
   ConstructorDeclaration, ClassDeclaration, MethodDeclaration
 } from "ts-morph";
 
@@ -30,13 +30,17 @@ const TYPES_ALLOWED_TO_AWAIT_WITH = new Set(["WorkflowContext", "TransactionCont
 
 ////////// These are some utility functions
 
-// This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost term). This term need not be an identifier.
-function reduceExprToLeftmostTerm(node: Expression): Node {
-  while (Node.isPropertyAccessExpression(node) || Node.isCallExpression(node)) {
-    node = node.getExpression();
-  }
+// This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
+function reduceNodeToLeftmostLeaf(node: Node): Node {
+ while (true) {
+    let value = node.getFirstChild();
 
-  return node;
+    if (value === undefined) {
+      return node;
+    }
+
+    node = value;
+  }
 }
 
 function evaluateClassForDeterminism(theClass: ClassDeclaration) {
@@ -66,21 +70,15 @@ function makeEslintNode(tsMorphNode: Node): any {
   return globalParserServices!.tsNodeToESTreeNodeMap.get(compilerNode);
 }
 
-function getTypeForTsMorphNode(tsMorphNode: Node): string {
+// If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
+function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   /* We need to use the typechecker to check the type, instead of `expr.getType()`,
   since type information is lost when creating `ts-morph` nodes from Typescript compiler
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
   const type = globalTypeChecker!.getTypeAtLocation(tsMorphNode.compilerNode);
-  const name = type.getSymbol()?.getName();
-
-  if (name === undefined) {
-    throw new Error("Unable to extract a type from the TSMorph node!");
-  }
-  else {
-    return name;
-  }
+  return type.getSymbol()?.getName();
 }
 
 ////////// These functions are the determinism heuristics that I've written
@@ -90,7 +88,7 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
     const subexpr = node.getExpression();
 
     if (Node.isBinaryExpression(subexpr)) {
-      const lhs = reduceExprToLeftmostTerm(subexpr.getLeft());
+      const lhs = reduceNodeToLeftmostLeaf(subexpr.getLeft());
 
       if (Node.isIdentifier(lhs) && !isLocal(lhs.getText())) {
         return "This is a global modification relative to the workflow/transaction declaration.";
@@ -140,22 +138,25 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 const awaitsOnAllowedType: DetChecker = (node, _fn, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
   if (Node.isAwaitExpression(node)) {
-    let expr = reduceExprToLeftmostTerm(node.getExpression());
+    let expr = reduceNodeToLeftmostLeaf(node.getExpression());
 
     // In this case, we are awaiting on a literal value, which doesn't make a ton of sense
     if (!Node.isIdentifier(expr)) {
-     if (!Node.isLiteralExpression(expr)) {
-        throw new Error("Hm, what could this expression be?");
+      if (Node.isLiteralExpression(expr)) {
+        return; // Don't check literals (that's invalid code, and that will be handled by something else)
       }
-      else {
-        return; // Don't check literals
+      else if (!Node.isThisExpression(expr)) { // Don't fail on `this` (since it may have a type too)
+        throw new Error(`Hm, what could this expression be? (${expr.getKindName()}, ${expr.print()})`);
       }
     }
 
-    const typeName = getTypeForTsMorphNode(expr);
+    const typeName = getTypeNameForTsMorphNode(expr);
 
-    if (!TYPES_ALLOWED_TO_AWAIT_WITH.has(typeName)) { // TODO: test this
-      return `This function should not await with a leftmost variable of type \`${typeName}\` (allowed types: ${JSON.stringify(TYPES_ALLOWED_TO_AWAIT_WITH)})`;
+    /* If the typename is undefined, there's no associated typename (so possibly a
+    variable is being used that was never defined; that error will be handled elsewhere) */
+    if (typeName !== undefined && !TYPES_ALLOWED_TO_AWAIT_WITH.has(typeName)) {
+      const allowedAsString = [...TYPES_ALLOWED_TO_AWAIT_WITH].join(", ");
+      return `This function should not await with a leftmost value of type \`${typeName}\` (name = \`${expr.print()}\`, allowed types = {${allowedAsString}})`;
     }
   }
 }
