@@ -149,11 +149,11 @@ Also, some `bcrypt` functions generate random data and should only be called fro
     const validArgCountsAndMessage = bannedFunctionsWithValidArgCountsAndMessages.get(text);
 
     if (validArgCountsAndMessage !== undefined) {
-      const [validArgCounts, customMessage] = validArgCountsAndMessage;
+      const [validArgCounts, message] = validArgCountsAndMessage;
       const argCount = node.getArguments().length;
 
       if (validArgCounts.has(argCount)) {
-        return customMessage;
+        return message;
       }
     }
   }
