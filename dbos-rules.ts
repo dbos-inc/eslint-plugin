@@ -121,7 +121,12 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   //////////
 
   if (Node.isCallExpression(node) || Node.isNewExpression(node)) {
-    const text = node.getExpression().getText(); // TODO: make this work for cases like `Math. random()`!
+    /* Doing this to make syntax like `Math. random` be reduced to `Math.random`
+    (although this might not work for more complicated function call layouts) */
+    const expr = node.getExpression();
+    const kids = expr.getChildren();
+    const text = (kids.length === 0) ? expr.getText() : kids.map((node) => node.getText()).join("");
+
     const validArgCountsAndMessage = bannedFunctionsWithValidArgCountsAndMessages.get(text);
 
     if (validArgCountsAndMessage !== undefined) {
@@ -135,6 +140,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   }
 }
 
+// TODO: make such awaits acceptable if the rightmost function you're calling is being passed an allowed type
 const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
   if (Node.isAwaitExpression(node)) {
