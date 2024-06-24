@@ -22,7 +22,9 @@ type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDec
 // This returns `undefined` if there is no error message to emit
 type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
-let globalTools: {eslintContext: any, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker} | undefined = undefined;
+// TODO: figure out how to make the `any` types around here typed
+type GlobalTools = {eslintContext: any, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker};
+let globalTools: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
 const DETERMINISTIC_DECORATORS = new Set(["Workflow"]);
