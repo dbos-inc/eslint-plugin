@@ -8,6 +8,7 @@ import {
   MethodDeclaration
 } from "ts-morph";
 
+// TODO: find Typescript variants of these
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
