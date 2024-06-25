@@ -36,7 +36,8 @@ const ERROR_MESSAGES = makeErrorMessageSet();
 ////////// This is the set of error messages that can be emitted
 
 function makeErrorMessageSet(): Map<string, string> {
-  const makeDateMessage = (variantEnd: string) => `Calling \`Date${variantEnd}()\` is banned (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
+  const makeDateMessage = (bannedCall: string) => `Calling ${bannedCall} is banned \
+(consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
 
   const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
@@ -45,11 +46,11 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["globalModification", "This is a global modification relative to the workflow declaration."],
-    ["awaitingOnNotAllowedType", `This function (expected to be deterministic) should not await with a leftmost value of this type (allowed set: ${validTypeSetString})`],
-    ["Date", makeDateMessage("")],
-    ["Date.now", makeDateMessage(".now")],
-    ["Math.random", "Avoid calling Math.random() directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
+    ["globalModification", "This is a global modification relative to the workflow declaration"],
+    ["awaitingOnNotAllowedType", `This function (expected to be deterministic) should not await with a leftmost value of this type (allowed set: \{${validTypeSetString}\})`],
+    ["Date", makeDateMessage("`Date()` or `new Date()`")],
+    ["Date.now", makeDateMessage("`Date.now()`")],
+    ["Math.random", "Avoid calling `Math.random()` directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
     ["setTimeout", "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"],
     ["bcrypt.hash", bcryptMessage],
     ["bcrypt.compare", bcryptMessage]
@@ -126,9 +127,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
-  // TODO: use `getSymbolAtLocation` instead
-  const type = GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
-  return type.getSymbol()?.getName();
+  return GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode).getSymbol()?.getName();
 }
 
 ////////// These functions are the determinism heuristics that I've written

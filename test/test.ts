@@ -107,7 +107,7 @@ class Foo {
 }`)]
   ],
 
-  ["banned functions",
+  ["banned/not banned functions",
     [
       makeCaseForOkayCall("foo()"),
       makeCaseForOkayCall("Date('December 17, 1995 03:24:00')"),
@@ -124,8 +124,9 @@ class Foo {
     ]
   ],
 
-  ["allowed awaits",
+  ["allowed/not allowed awaits",
     [
+      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "({}).foo()"), // TODO: probably make this not allowed
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.foo()"),
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.client<User>('users').select('password').where({ username }).first();")
@@ -134,9 +135,12 @@ class Foo {
     [
       makeCaseForBannedAwaitCall("", "fetch('https://www.google.com')"),
       makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.foo()")
+      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.foo()"),
+      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.client<User>('users').select('password').where({ username }).first();")
     ]
   ]
 ];
 
 testSet.forEach((test) => doTest(...test));
+
+// TODO: test the 1 other await case
