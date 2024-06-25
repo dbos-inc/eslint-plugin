@@ -19,16 +19,42 @@ const noSecrets = require("eslint-plugin-no-secrets");
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 
-// This returns `undefined` if there is no error message to emit
+// This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
 type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
 // TODO: figure out how to make the `any` types around here typed
 type GlobalTools = {eslintContext: any, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker};
-let globalTools: GlobalTools | undefined = undefined;
+let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
 const DETERMINISTIC_DECORATORS = new Set(["Workflow"]);
 const TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS = new Set(["WorkflowContext"]);
+const ERROR_MESSAGES = makeErrorMessageSet();
+
+////////// This is the set of error messages that can be emitted
+
+function makeErrorMessageSet(): Map<string, string> {
+  const makeDateMessage = (variantEnd: string) => `Calling \`Date${variantEnd}()\` is banned (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
+
+  const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
+Also, some `bcrypt` functions generate random data and should only be called from communicators";
+
+  const validTypeSetString: string = [...TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS].map((name) => `\`${name}\``).join(", ");
+
+  // The keys are the ids, and the values are the messages themselves
+  return new Map([
+    ["globalModification", "This is a global modification relative to the workflow declaration."],
+    ["awaitingOnNotAllowedType", `This function (expected to be deterministic) should not await with a leftmost value of this type (allowed set: ${validTypeSetString})`],
+    ["Date", makeDateMessage("")],
+    ["Date.now", makeDateMessage(".now")],
+    ["Math.random", "Avoid calling Math.random() directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
+    ["setTimeout", "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"],
+    ["bcrypt.hash", bcryptMessage],
+    ["bcrypt.compare", bcryptMessage]
+  ]);
+}
+
+//////////
 
 /* Typically, awaiting on something in a workflow function is not allowed,
 since awaiting usually indicates IO, which may be nondeterministic. The only exception
@@ -47,6 +73,12 @@ While this seems nondeterministic, it's likely to be deterministic, since the `g
 probably just does the snippet above, but in an abstracted manner (so `getUser` would be a helper function).
 So, setting this flag means that determinism warnings will be disabled for awaits in this situation. */
 const ignoreAwaitsForCallsWithAContextParam = true;
+
+/*
+TODO (Harry's request):
+Peter asked me to add a config setting for @StoredProcedure methods to enable them to run locally.
+How hard is it to add a linter rule to always warn the user of this config setting is enabled?`
+*/
 
 ////////// These are some utility functions
 
@@ -76,20 +108,13 @@ function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
 
 // Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
 function makeTsMorphNode(eslintNode: any): Node {
-  const compilerNode = globalTools!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
-
-  const options = { // TODO: should I pass some compiler options in too, and if so, how?
-    compilerOptions: undefined,
-    sourceFile: compilerNode.getSourceFile(),
-    typeChecker: globalTools!.typeChecker
-  };
-
-  return createWrappedNode(compilerNode, options);
+  const compilerNode = GLOBAL_TOOLS!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
+  return createWrappedNode(compilerNode);
 }
 
 function makeEslintNode(tsMorphNode: Node): any {
   const compilerNode = tsMorphNode.compilerNode;
-  return globalTools!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
+  return GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
 }
 
 // If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
@@ -99,7 +124,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
-  const type = globalTools!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
+  const type = GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
   return type.getSymbol()?.getName();
 }
 
@@ -113,7 +138,7 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
       const lhs = reduceNodeToLeftmostLeaf(subexpr.getLeft());
 
       if (Node.isIdentifier(lhs) && !isLocal(lhs.getText())) {
-        return "This is a global modification relative to the workflow/transaction declaration.";
+        return "globalModification";
       }
 
       /* TODO: warn about these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
@@ -126,18 +151,14 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
 /* TODO: should I ban IO functions, like `fetch`, `console.log`,
 and mutating global arrays via functions like `push`, etc.? */
 const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
-  const makeDateMessage = (variantEnd: string) => `Calling \`Date${variantEnd}()\` is banned (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
-
-  const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
-Also, some `bcrypt` functions generate random data and should only be called from communicators"
-
-  const bannedFunctionsWithValidArgCountsAndMessages: Map<string, [Set<number>, string]> = new Map([
-    ["Date",           [new Set([0]),    makeDateMessage("")]], // This covers `new Date()` as well
-    ["Date.now",       [new Set([0]),    makeDateMessage(".now")]],
-    ["Math.random",    [new Set([0]),    "Avoid calling Math.random() directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"]],
-    ["setTimeout",     [new Set([1, 2]), "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"]],
-    ["bcrypt.hash",    [new Set([3]),    bcryptMessage]],
-    ["bcrypt.compare", [new Set([3]),    bcryptMessage]]
+  // All of these function names are also keys in `ERROR_MESSAGES` above
+  const bannedFunctionsWithValidArgCounts: Map<string, Set<number>> = new Map([
+    ["Date",           new Set([0])],
+    ["Date.now",       new Set([0])],
+    ["Math.random",    new Set([0])],
+    ["setTimeout",     new Set([1, 2])],
+    ["bcrypt.hash",    new Set([3])],
+    ["bcrypt.compare", new Set([3])]
   ]);
 
   //////////
@@ -149,14 +170,13 @@ Also, some `bcrypt` functions generate random data and should only be called fro
     const kids = expr.getChildren();
     const text = (kids.length === 0) ? expr.getText() : kids.map((node) => node.getText()).join("");
 
-    const validArgCountsAndMessage = bannedFunctionsWithValidArgCountsAndMessages.get(text);
+    const validArgCounts = bannedFunctionsWithValidArgCounts.get(text);
 
-    if (validArgCountsAndMessage !== undefined) {
-      const [validArgCounts, message] = validArgCountsAndMessage;
+    if (validArgCounts !== undefined) {
       const argCount = node.getArguments().length;
 
       if (validArgCounts.has(argCount)) {
-        return message;
+        return text; // Returning the function name key
       }
     }
   }
@@ -194,7 +214,10 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
     (so possibly a variable is being used that was never defined;
     that error will be handled elsewhere). */
     const typeName = getTypeNameForTsMorphNode(lhs);
-    if (typeName === undefined) return;
+
+    if (typeName === undefined) {
+      return;
+    }
 
     const validSet = TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS;
     const awaitingOnAllowedType = validSet.has(typeName);
@@ -204,12 +227,10 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
       an allowed type, since that probably means that that function is
       a helper function which is deterministic and uses our allowed type. */
       if (ignoreAwaitsForCallsWithAContextParam && validTypeExistsInFunctionCallParams(functionCall, validSet)) {
-        return;
-        // return `Not warning about this await, since it seems that the called function is being passed an awaitable type, so it's probably a helper function`;
+       return;
       }
 
-      const allowedAsString = [...validSet].map((name) => `\`${name}\``).join(", ");
-      return `This function should not await with a leftmost value of type \`${typeName}\` (name = \`${lhs.print()}\`, allowed types = {${allowedAsString}})`;
+    return "awaitingOnNotAllowedType";
     }
   }
 }
@@ -250,17 +271,18 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
       popFrame();
       return;
     }
+    // Note: parameters are not considered to be locals here (modifying them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
       locals.add(node.getName());
     }
     else if (functionShouldBeDeterministic(fn)) {
 
       detCheckers.forEach((detChecker) => {
-        const maybe_error_string = detChecker(node, fn, isLocal);
+        const messageKey = detChecker(node, fn, isLocal);
 
-        if (maybe_error_string !== undefined) {
+        if (messageKey !== undefined) {
           const correspondingEslintNode = makeEslintNode!(node);
-          globalTools!.eslintContext.report({node: correspondingEslintNode, message: maybe_error_string});
+          GLOBAL_TOOLS!.eslintContext.report({ node: correspondingEslintNode, messageId: messageKey });
         }
       });
 
@@ -281,7 +303,7 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
 function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContext: any) {
   const parserServices = ESLintUtils.getParserServices(eslintContext);
 
-  globalTools = {
+  GLOBAL_TOOLS = {
     eslintContext: eslintContext,
     parserServices: parserServices,
     typeChecker: parserServices.program.getTypeChecker()
@@ -300,7 +322,7 @@ function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContext: any) {
   }
   finally {
     // Not keeping the tools around after failure
-    globalTools = undefined;
+    GLOBAL_TOOLS = undefined;
   }
 }
 
@@ -331,13 +353,13 @@ const baseConfig = {
     "@dbos-inc/unexpected-nondeterminism": "error"
   },
 
-  "extends": []
+  extends: []
 };
 
 const recConfig = {
   ...baseConfig,
 
-  "extends": [
+  extends: [
     ...baseConfig.extends,
     "plugin:@typescript-eslint/recommended-requiring-type-checking",
     "eslint:recommended",
@@ -361,7 +383,7 @@ const recConfig = {
 const extConfig = {
   ...recConfig,
 
-  "extends" : [...recConfig.extends],
+  extends: [...recConfig.extends],
 
   rules: {
     ...recConfig.rules,
@@ -371,8 +393,8 @@ const extConfig = {
 
 module.exports = {
   meta: {
-    "name": "@dbos-inc/eslint-plugin",
-    "version": "0.0.7",
+    name: "@dbos-inc/eslint-plugin",
+    version: "0.0.7"
   },
 
   rules: {
@@ -380,7 +402,7 @@ module.exports = {
       meta: {
         type: "suggestion",
         docs: { description: "Detect nondeterminism in cases where functions should act deterministically" },
-        schema: []
+        messages: Object.fromEntries(ERROR_MESSAGES)
       },
 
       create: function (context: any) {
