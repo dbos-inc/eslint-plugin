@@ -12,6 +12,11 @@ import {
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
+// https://stackoverflow.com/questions/51851677/how-to-get-argument-types-from-function-in-typescript
+type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any ? A : never;
+type EslintContext = ArgumentTypes<typeof ESLintUtils.getParserServices>[0]; // TODO: stop using this construct
+type EslintNode = any; // TODO: type this
+
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
 ////////// These are some shared types and values used throughout the code
@@ -22,8 +27,7 @@ type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDec
 // This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
 type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
-// TODO: figure out how to make the `any` types around here typed
-type GlobalTools = {eslintContext: any, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker};
+type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker};
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
@@ -107,12 +111,12 @@ function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
 }
 
 // Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
-function makeTsMorphNode(eslintNode: any): Node {
+function makeTsMorphNode(eslintNode: EslintNode): Node {
   const compilerNode = GLOBAL_TOOLS!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
   return createWrappedNode(compilerNode);
 }
 
-function makeEslintNode(tsMorphNode: Node): any {
+function makeEslintNode(tsMorphNode: Node): EslintNode {
   const compilerNode = tsMorphNode.compilerNode;
   return GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
 }
@@ -300,7 +304,7 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
 
 ////////// This is the entrypoint for running the determinism analysis with `ts-morph`
 
-function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContext: any) {
+function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: EslintContext) {
   const parserServices = ESLintUtils.getParserServices(eslintContext);
 
   GLOBAL_TOOLS = {
@@ -309,7 +313,7 @@ function analyzeEstreeNodeForDeterminism(estreeNode: any, eslintContext: any) {
     typeChecker: parserServices.program.getTypeChecker()
   };
 
-  const tsMorphNode = makeTsMorphNode(estreeNode);
+  const tsMorphNode = makeTsMorphNode(eslintNode);
 
   try {
     if (Node.isSourceFile(tsMorphNode)) {
@@ -405,13 +409,13 @@ module.exports = {
         messages: Object.fromEntries(ERROR_MESSAGES)
       },
 
-      create: function (context: any) {
+      create: function (context: EslintContext) {
         return {
           /* Note: I am working with ts-morph because it has
           stronger typing, and it's easier to work with the AST
           than ESTree's limited tree navigation. */
-          Program(node: any) {
-            analyzeEstreeNodeForDeterminism(node, context);
+          Program(node: EslintNode) {
+            analyzeRootNodeForDeterminism(node, context);
           }
         }
       }
