@@ -12,7 +12,7 @@
   "homepage": "https://docs.dbos.dev/",
   "scripts": {
     "build": "tsc",
-    "test": "tsc && vitest"
+    "test": "vitest"
   },
   "dependencies": {
     "@types/node": "^20.14.6",
