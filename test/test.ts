@@ -126,8 +126,8 @@ class Foo {
 
   ["allowed/not allowed awaits",
     [
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "new Set()"), // TODO: definitely make this not allowed
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "({}).foo()"), // TODO: probably make this not allowed
+      makeCaseForOkayAwaitCall("", "new Set()"), // TODO: definitely make this not allowed
+      makeCaseForOkayAwaitCall("", "({}).foo()"), // TODO: probably make this not allowed
 
       // When you don't await on a `WorkflowContext`, but you pass a param into the function you're calling, it's okay
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "foo(ctxt); async function foo(bar: WorkflowContext) {return bar.baz();} "),
