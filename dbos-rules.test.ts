@@ -1,11 +1,11 @@
 import * as vitest from "vitest";
 import { RuleTester } from "@typescript-eslint/rule-tester";
-const rulesUnderTest = require("../dist/src/dbos-rules.js"); // TODO: import my rules normally (and no `tsc` before the test too)
+import { dbosRulesPerName } from "./dbos-rules";
 
-RuleTester.afterAll = vitest.afterAll;
 RuleTester.it = vitest.it;
 RuleTester.itOnly = vitest.it.only;
 RuleTester.describe = vitest.describe;
+RuleTester.afterAll = vitest.afterAll;
 
 //////////
 
@@ -25,7 +25,7 @@ type InvalidTest = ArrayElementType<InvalidTests>;
 
 function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
   const ruleName = "unexpected-nondeterminism";
-  tester.run(title, rulesUnderTest.rules[ruleName], { valid: valid, invalid: invalid });
+  tester.run(title, dbosRulesPerName[ruleName], { valid: valid, invalid: invalid });
 }
 
 //////////
@@ -33,7 +33,7 @@ function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
 const tester = new RuleTester({
   parser: "@typescript-eslint/parser",
   parserOptions: { project: "tsconfig.json" },
-  defaultFilenames: { ts: "test/dbos-rules.test.ts", tsx: "test/this_file_doesnt_exist.tsx" }
+  defaultFilenames: { ts: "dbos-rules.test.ts", tsx: "this_file_doesnt_exist.tsx" }
 });
 
 function makeExpectedDetCode(code: string, params: string = "", aboveClass: string = ""): string {

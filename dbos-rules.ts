@@ -431,3 +431,5 @@ module.exports = {
     dbosExtendedConfig: extConfig
   }
 };
+
+export const dbosRulesPerName: any = module.exports.rules;
