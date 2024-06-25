@@ -39,7 +39,7 @@ function makeErrorMessageSet(): Map<string, string> {
   const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
-  const validTypeSetString: string = [...TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS].map((name) => `\`${name}\``).join(", ");
+  const validTypeSetString = [...TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS].map((name) => `\`${name}\``).join(", ");
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
