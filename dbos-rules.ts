@@ -8,7 +8,7 @@ import {
   MethodDeclaration
 } from "ts-morph";
 
-// TODO: find Typescript variants of these
+// Should I find TypeScript variants of these?
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
@@ -123,7 +123,7 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 // If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   /* We need to use the typechecker to check the type, instead of `expr.getType()`,
-  since type information is lost when creating `ts-morph` nodes from Typescript compiler
+  since type information is lost when creating `ts-morph` nodes from TypeScript compiler
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
