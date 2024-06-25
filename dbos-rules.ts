@@ -47,7 +47,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   // The keys are the ids, and the values are the messages themselves
   return new Map([
     ["globalModification", "This is a global modification relative to the workflow declaration"],
-    ["awaitingOnNotAllowedType", `This function (expected to be deterministic) should not await with a leftmost value of this type (allowed set: \{${validTypeSetString}\})`],
+    ["awaitingOnNotAllowedType", `This function should not await with the current leftmost type (allowed set: \{${validTypeSetString}\})`],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
     ["Date.now", makeDateMessage("`Date.now()`")],
     ["Math.random", "Avoid calling `Math.random()` directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
@@ -199,7 +199,10 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
 
   if (Node.isAwaitExpression(node)) {
     const functionCall = node.getExpression();
-    if (!Node.isCallExpression(functionCall)) return; // Wouldn't make sense otherwise
+
+    if (!Node.isCallExpression(functionCall)) {
+      return; // Wouldn't make sense otherwise
+    }
 
     let lhs = reduceNodeToLeftmostLeaf(functionCall);
 
@@ -214,7 +217,9 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
 
     /* If the typename is undefined, there's no associated typename
     (so possibly a variable is being used that was never defined;
-    that error will be handled elsewhere). */
+    that error will be handled elsewhere). TODO: figure out what's
+    happening when the Typescript compiler can't get type info out
+    of the LHS (that happens in some very rare cases). */
     const typeName = getTypeNameForTsMorphNode(lhs);
 
     if (typeName === undefined) {
@@ -229,10 +234,10 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
       an allowed type, since that probably means that that function is
       a helper function which is deterministic and uses our allowed type. */
       if (ignoreAwaitsForCallsWithAContextParam && validTypeExistsInFunctionCallParams(functionCall, validSet)) {
-       return;
+        return;
       }
 
-    return "awaitingOnNotAllowedType";
+      return "awaitingOnNotAllowedType";
     }
   }
 }
