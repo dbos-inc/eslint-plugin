@@ -1,8 +1,11 @@
-import { after as mochaAfter } from "mocha"; // TODO: switch to `jest` or `vitest`
+import * as vitest from "vitest";
 import { RuleTester } from "@typescript-eslint/rule-tester";
-const rulesUnderTest = require("../dist/src/dbos-rules.js"); // TODO: import my rules normally
+const rulesUnderTest = require("../dist/src/dbos-rules.js"); // TODO: import my rules normally (and no `tsc` before the test too)
 
-RuleTester.afterAll = mochaAfter;
+RuleTester.afterAll = vitest.afterAll;
+RuleTester.it = vitest.it;
+RuleTester.itOnly = vitest.it.only;
+RuleTester.describe = vitest.describe;
 
 //////////
 
@@ -30,7 +33,7 @@ function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
 const tester = new RuleTester({
   parser: "@typescript-eslint/parser",
   parserOptions: { project: "tsconfig.json" },
-  defaultFilenames: { ts: "test/test.ts", tsx: "test/this_file_doesnt_exist.tsx" }
+  defaultFilenames: { ts: "test/dbos-rules.test.ts", tsx: "test/this_file_doesnt_exist.tsx" }
 });
 
 function makeExpectedDetCode(code: string, params: string = "", aboveClass: string = ""): string {

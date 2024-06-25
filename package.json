@@ -12,10 +12,9 @@
   "homepage": "https://docs.dbos.dev/",
   "scripts": {
     "build": "tsc",
-    "test": "tsc && ts-mocha test/test.ts"
+    "test": "tsc && vitest test/dbos-rules.test.ts"
   },
   "dependencies": {
-    "@types/mocha": "^10.0.7",
     "@types/node": "^20.14.6",
     "@typescript-eslint/eslint-plugin": "^7.13.1",
     "@typescript-eslint/parser": "^7.13.1",
@@ -23,10 +22,9 @@
     "@typescript-eslint/utils": "^7.13.1",
     "eslint-plugin-no-secrets": "^0.8.9",
     "eslint-plugin-security": "^2.1.0",
-    "mocha": "^10.4.0",
-    "ts-mocha": "^10.0.0",
     "ts-morph": "^22.0.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
   },
   "keywords": [
     "eslint",
