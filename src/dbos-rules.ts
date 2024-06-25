@@ -1,6 +1,6 @@
 import { TypeChecker } from "typescript";
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
-import { ESLintUtils, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
+import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 
 import {
   createWrappedNode, Node, FunctionDeclaration,
@@ -12,10 +12,8 @@ import {
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
-// https://stackoverflow.com/questions/51851677/how-to-get-argument-types-from-function-in-typescript
-type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any ? A : never;
-type EslintContext = ArgumentTypes<typeof ESLintUtils.getParserServices>[0]; // TODO: stop using this construct
-type EslintNode = any; // TODO: type this
+type EslintNode = TSESTree.Node;
+type EslintContext = TSESLint.RuleContext<string, unknown[]>;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
@@ -128,6 +126,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
+  // TODO: use `getSymbolAtLocation` instead
   const type = GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
   return type.getSymbol()?.getName();
 }
