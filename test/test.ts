@@ -126,7 +126,12 @@ class Foo {
 
   ["allowed/not allowed awaits",
     [
+      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "new Set()"), // TODO: definitely make this not allowed
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "({}).foo()"), // TODO: probably make this not allowed
+
+      // When you don't await on a `WorkflowContext`, but you pass a param into the function you're calling, it's okay
+      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "foo(ctxt); async function foo(bar: WorkflowContext) {return bar.baz();} "),
+
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.foo()"),
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
       makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.client<User>('users').select('password').where({ username }).first();")
@@ -134,13 +139,13 @@ class Foo {
 
     [
       makeCaseForBannedAwaitCall("", "fetch('https://www.google.com')"),
+      makeCaseForBannedAwaitCall("", "foo(); async function foo() {return 5;} "),
       makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.foo()"),
       makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.client<User>('users').select('password').where({ username }).first();")
+      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.client<User>('users').select('password').where({ username }).first();"),
+      makeCaseForBannedAwaitCall("ctxt: object", "5; const y = new Set(); await y.foo()")
     ]
   ]
 ];
 
 testSet.forEach((test) => doTest(...test));
-
-// TODO: test the 1 other await case
