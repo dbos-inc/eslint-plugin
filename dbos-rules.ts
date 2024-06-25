@@ -351,7 +351,7 @@ const baseConfig = {
     "no-console": "error",
     "security/detect-unsafe-regex": "error",
     "no-secrets/no-secrets": "error",
-    "@dbos-inc/unexpected-nondeterminism": "error"
+    "@dbos-inc/detect-nondeterministic-calls": "error"
   },
 
   extends: []
@@ -399,7 +399,7 @@ module.exports = {
   },
 
   rules: {
-    "unexpected-nondeterminism": {
+    "detect-nondeterministic-calls": {
       meta: {
         type: "suggestion",
         docs: { description: "Detect nondeterminism in cases where functions should act deterministically" },

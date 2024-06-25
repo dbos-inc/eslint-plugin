@@ -24,7 +24,7 @@ type ValidTest = ArrayElementType<ValidTests>;
 type InvalidTest = ArrayElementType<InvalidTests>;
 
 function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
-  const ruleName = "unexpected-nondeterminism";
+  const ruleName = "detect-nondeterministic-calls";
   tester.run(title, dbosRulesPerName[ruleName], { valid: valid, invalid: invalid });
 }
 
