@@ -328,8 +328,7 @@ function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: Es
   }
 }
 
-/* Other TODO:
-- Take a look at these functions:
+/* Take a look at these functions later on:
 isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName
 - Check function expressions and arrow functions for mutation (and interfaces?)
 - Check for recursive global mutation for expected-to-be-deterministic functions
