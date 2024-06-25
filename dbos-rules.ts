@@ -406,7 +406,7 @@ module.exports = {
         messages: Object.fromEntries(ERROR_MESSAGES)
       },
 
-      create: function (context: EslintContext) {
+      create: (context: EslintContext) => {
         return {
           /* Note: I am working with ts-morph because it has
           stronger typing, and it's easier to work with the AST
