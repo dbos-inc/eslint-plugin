@@ -134,8 +134,8 @@ class Foo {
 
     [
       makeCaseForBannedAwaitCall("", "fetch('https://www.google.com')"),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
       makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.foo()"),
+      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
       makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.client<User>('users').select('password').where({ username }).first();")
     ]
   ]
