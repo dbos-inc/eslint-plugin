@@ -9,11 +9,16 @@ RuleTester.afterAll = mochaAfter;
 // https://stackoverflow.com/questions/51851677/how-to-get-argument-types-from-function-in-typescript
 type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any ? A : never;
 
+// https://stackoverflow.com/questions/41253310/typescript-retrieve-element-type-information-from-array-type
+type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends readonly (infer T)[] ? T : never;
+
 type TestTypes = ArgumentTypes<typeof tester.run>[2];
 type ValidTests = TestTypes["valid"];
 type InvalidTests = TestTypes["invalid"];
 
 type TestSet = [string, ValidTests, InvalidTests][];
+type ValidTest = ArrayElementType<ValidTests>;
+type InvalidTest = ArrayElementType<InvalidTests>;
 
 function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
   const ruleName = "unexpected-nondeterminism";
@@ -40,30 +45,25 @@ function makeExpectedDetCode(code: string, params: string = "", aboveClass: stri
   `;
 }
 
-// TODO: give this a better return type
-function makeCaseForModification(numErrors: number, code: string): any {
+function makeCaseForModification(numErrors: number, code: string): InvalidTest {
   return { code: code, errors: Array(numErrors).fill({ messageId: "globalModification" }) };
 }
 
-// TODO: this too
-function makeCaseForOkayCall(call: string): any {
+function makeCaseForOkayCall(call: string): ValidTest {
   return { code: makeExpectedDetCode(`const x = ${call};`) };
 }
 
-// TODO: this too
-function makeCaseForBannedCall(prefix: string, functionName: string, params: string): any {
+function makeCaseForBannedCall(prefix: string, functionName: string, params: string): InvalidTest {
   return { code: makeExpectedDetCode(`const x = ${prefix} ${functionName}(${params});`), errors: [{ messageId: functionName }] }
 }
 
-function makeCaseForOkayAwaitCall(params: string, awaitedUpon: string): any {
-  const code = makeExpectedDetCode(`const x = await ${awaitedUpon};`, params, "class WorkflowContext {}");
-  return { code: code };
+function makeCaseForOkayAwaitCall(params: string, awaitedUpon: string): ValidTest {
+  return { code: makeExpectedDetCode(`const x = await ${awaitedUpon};`, params, "class WorkflowContext {}") };
 }
 
-// TODO: this too
-function makeCaseForBannedAwaitCall(params: string, awaitedUpon: string): any {
+function makeCaseForBannedAwaitCall(params: string, awaitedUpon: string): InvalidTest {
   const code = makeExpectedDetCode(`const x = await ${awaitedUpon};`, params, "class FooBar {}");
-  return { code: code, errors: [{ messageId: "awaitingOnNotAllowedType" }]};
+  return { code: code, errors: [{ messageId: "awaitingOnNotAllowedType" }] };
 }
 
 const testSet: TestSet = [
