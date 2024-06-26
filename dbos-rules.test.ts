@@ -16,16 +16,16 @@ type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any ? A
 type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends readonly (infer T)[] ? T : never;
 
 type TestTypes = ArgumentTypes<typeof tester.run>[2];
-type ValidTests = TestTypes["valid"];
-type InvalidTests = TestTypes["invalid"];
+type SuccessTests = TestTypes["valid"];
+type FailureTests = TestTypes["invalid"];
 
-type TestSet = [string, ValidTests, InvalidTests][];
-type ValidTest = ArrayElementType<ValidTests>;
-type InvalidTest = ArrayElementType<InvalidTests>;
+type TestSet = [string, SuccessTests, FailureTests][];
+type SuccessTest = ArrayElementType<SuccessTests>;
+type FailureTest = ArrayElementType<FailureTests>;
 
-function doTest(title: string, valid: ValidTests, invalid: InvalidTests) {
+function doTest(title: string, successTests: SuccessTests, failureTests: FailureTests) {
   const ruleName = "detect-nondeterministic-calls";
-  tester.run(title, dbosRulesPerName[ruleName], { valid: valid, invalid: invalid });
+  tester.run(title, dbosRulesPerName[ruleName], { valid: successTests, invalid: failureTests });
 }
 
 //////////
@@ -36,117 +36,182 @@ const tester = new RuleTester({
   defaultFilenames: { ts: "dbos-rules.test.ts", tsx: "this_file_doesnt_exist.tsx" }
 });
 
-function makeExpectedDetCode(code: string, params: string = "", aboveClass: string = ""): string {
+////////// These functions build different types of test cases with some primitive code structure around them.
+
+function makeExpectedDetCode(
+  code: string,
+  codeAboveClass: string,
+  enclosingFunctionParams: string): string {
+
   return `
-    ${aboveClass}
+    ${codeAboveClass}
+
     class Foo {
       @Workflow
-      bar(${params}) {
+      foo(${enclosingFunctionParams}) {
         ${code}
       }
     }
   `;
 }
 
-function makeCaseForModification(numErrors: number, code: string): InvalidTest {
-  return { code: code, errors: Array(numErrors).fill({ messageId: "globalModification" }) };
+function makeExpectedSuccessTest(code: string,
+  { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
+
+  return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams) };
 }
 
-function makeCaseForOkayCall(call: string): ValidTest {
-  return { code: makeExpectedDetCode(`const x = ${call};`) };
+function makeExpectedFailureTest(code: string, expectedErrorIds: string[],
+  { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
+
+  const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
+  return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
 }
 
-function makeCaseForBannedCall(prefix: string, functionName: string, params: string): InvalidTest {
-  return { code: makeExpectedDetCode(`const x = ${prefix} ${functionName}(${params});`), errors: [{ messageId: functionName }] }
-}
-
-function makeCaseForOkayAwaitCall(params: string, awaitedUpon: string): ValidTest {
-  return { code: makeExpectedDetCode(`const x = await ${awaitedUpon};`, params, "class WorkflowContext {}") };
-}
-
-function makeCaseForBannedAwaitCall(params: string, awaitedUpon: string): InvalidTest {
-  const code = makeExpectedDetCode(`const x = await ${awaitedUpon};`, params, "class FooBar {}");
-  return { code: code, errors: [{ messageId: "awaitingOnNotAllowedType" }] };
-}
+//////////
 
 const testSet: TestSet = [
-  ["global modifications", [], [makeCaseForModification(5,
-`
-let x = 3;
-let y = {a: 1, b: 2};
+  ["global mutations", [],
 
-class Foo {
-  @Workflow
-  foo() {
-    x = 4; // Not allowed
-    y.a += 1; // Not allowed
+    [makeExpectedFailureTest(
+      `
+      let x = 3;
+      let y = {a: 1, b: 2};
 
-    let y = {a: 3, b: 4}; // Aliases the global 'y'
-    y.a = 1; // Not a global modification anymore
-  }
+      class Bar {
+        @Workflow
+        foo() {
+          x = 4; // Not allowed
+          y.a += 1; // Not allowed
 
-  bar() {
-    y.b += 2;
-    let z = 8;
+          let y = {a: 3, b: 4}; // Aliases the global 'y'
+          y.a = 1; // Not a global modification anymore
+        }
 
-    class Bar {
-      @Workflow
-      w() {
-        z = 9; // Not allowed
-      }
-    }
-  }
+        bar() {
+          y.b += 2;
+          let z = 8;
 
-  @Workflow
-  baz() {
-    x *= 5; // Not allowed
-    y.b += y.a; // Not allowed
+          class Bar {
+            @Workflow
+            w() {
+              z = 9; // Not allowed
+            }
+          }
+        }
 
-    function bazbaz() {
-      x -= 6;
-      y.b += y.a;
-    }
-  }
-}`)]
+        @Workflow
+        baz() {
+          x *= 5; // Not allowed
+          y.b += y.a; // Not allowed
+
+          function bazbaz() {
+            x -= 6;
+            y.b += y.a;
+          }
+        }
+      }`,
+      Array(5).fill("globalModification") // Expecting 5 errors
+    )]
   ],
 
   ["banned/not banned functions",
     [
-      makeCaseForOkayCall("foo()"),
-      makeCaseForOkayCall("Date('December 17, 1995 03:24:00')"),
-      makeCaseForOkayCall("new Date('December 17, 1995 03:24:00')")
+      makeExpectedSuccessTest("foo();"), // Calling these `Date` variants is allowed
+      makeExpectedSuccessTest("Date('December 17, 1995 03:24:00');"),
+      makeExpectedSuccessTest("new Date('December 17, 1995 03:24:00');")
     ],
 
     [
-      makeCaseForBannedCall("", "Date", ""),
-      makeCaseForBannedCall("new", "Date", ""),
-      makeCaseForBannedCall("", "Math.random", ""),
-      makeCaseForBannedCall("", "setTimeout", "a, b"),
-      makeCaseForBannedCall("", "bcrypt.hash", "a, b, c"),
-      makeCaseForBannedCall("", "bcrypt.compare", "a, b, c")
+      /* The secondary args here are the expected error
+      IDs (which line up with the banned functions tested) */
+      makeExpectedFailureTest("Date();", ["Date"]),
+      makeExpectedFailureTest("new Date();", ["Date"]),
+      makeExpectedFailureTest("Math.random();", ["Math.random"]),
+      makeExpectedFailureTest("setTimeout(a, b);", ["setTimeout"]),
+      makeExpectedFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
+      makeExpectedFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
     ]
   ],
 
   ["allowed/not allowed awaits",
     [
-      makeCaseForOkayAwaitCall("", "new Set()"), // TODO: definitely make this not allowed
-      makeCaseForOkayAwaitCall("", "({}).foo()"), // TODO: probably make this not allowed
 
-      // When you don't await on a `WorkflowContext`, but you pass a param into the function you're calling, it's okay
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "foo(ctxt); async function foo(bar: WorkflowContext) {return bar.baz();} "),
+      makeExpectedSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
+      makeExpectedSuccessTest("await new Set();"), // TODO: definitely make this not allowed
 
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.foo()"),
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
-      makeCaseForOkayAwaitCall("ctxt: WorkflowContext", "ctxt.client<User>('users').select('password').where({ username }).first();")
+      // Awaiting on a method with a leftmost `WorkflowContext`, #1
+      makeExpectedSuccessTest(
+        "await ctxt.foo();",
+        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+      ),
+
+      // Awaiting on a method with a leftmost `WorkflowContext`, #2
+      makeExpectedSuccessTest(
+        "await ctxt.invoke(ShopUtilities).retrieveOrder(order_id);",
+        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+      ),
+
+      // Awaiting on a method with a leftmost `WorkflowContext`, #3
+      makeExpectedSuccessTest(
+        "await ctxt.client<User>('users').select('password').where({ username }).first();",
+        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+      ),
+
+      // Awaiting on a leftmost non-`WorkflowContext` type, but you pass a `WorkflowContext` in
+      makeExpectedSuccessTest(
+        `
+        async function workflowHelperFunction(ctxt: WorkflowContext) {
+          return await ctxt.baz();
+        }
+
+        await workflowHelperFunction(ctxt);
+        `,
+        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+      )
     ],
 
     [
-      makeCaseForBannedAwaitCall("", "fetch('https://www.google.com')"),
-      makeCaseForBannedAwaitCall("", "foo(); async function foo() {return 5;} "),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.foo()"),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.invoke(ShopUtilities).retrieveOrder(order_id)"),
-      makeCaseForBannedAwaitCall("ctxt: FooBar", "ctxt.client<User>('users').select('password').where({ username }).first();"),
-      makeCaseForBannedAwaitCall("ctxt: object", "5; const y = new Set(); await y.foo()")
+      // Awaiting on a not-allowed function, #1
+      makeExpectedFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
+
+      // Awaiting on a not-allowed function, #2
+      makeExpectedFailureTest(`
+        async function foo() {
+          return 5;
+        }
+
+        await foo();
+        `,
+        ["awaitingOnNotAllowedType"]
+      ),
+
+      // Awaiting on a not-allowed class, #1
+      makeExpectedFailureTest(
+        "const x = new Set(); await x.foo();",
+        ["awaitingOnNotAllowedType"]
+      ),
+
+      // Awaiting on a not-allowed class, #2
+      makeExpectedFailureTest(
+        "await fooBar.foo();",
+        ["awaitingOnNotAllowedType"],
+        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
+      ),
+
+      // Awaiting on a not-allowed class, #3
+      makeExpectedFailureTest(
+        "await fooBar.invoke(ShopUtilities).retrieveOrder(order_id);",
+        ["awaitingOnNotAllowedType"],
+        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
+      ),
+
+      // Awaiting on a not-allowed class, #4
+      makeExpectedFailureTest(
+        "await fooBar.client<User>('users').select('password').where({ username }).first();",
+        ["awaitingOnNotAllowedType"],
+        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
+      ),
     ]
   ]
 ];
