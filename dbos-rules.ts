@@ -30,7 +30,7 @@ let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
 const deterministicDecorators = new Set(["Workflow"]);
-const typesYouCanAwaitUponInDeterministicFunctions = new Set(["WorkflowContext"]);
+const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const errorMessages = makeErrorMessageSet();
 
 ////////// This is the set of error messages that can be emitted
@@ -39,15 +39,17 @@ function makeErrorMessageSet(): Map<string, string> {
   const makeDateMessage = (bannedCall: string) => `Calling ${bannedCall} is banned \
 (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
 
+  // TODO: update this message if more types are added in the future to `deterministicDecorators` or `awaitableTypes`
+  const awaitMessage = `The enclosing workflow makes an asynchronous call to a non-DBOS function. \
+Please verify that this call is deterministic or it may lead to non-reproducible behavior`;
+
   const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
-  const validTypeSetString = [...typesYouCanAwaitUponInDeterministicFunctions].map((name) => `\`${name}\``).join(", ");
-
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["globalModification", "This is a global modification relative to the workflow declaration"],
-    ["awaitingOnNotAllowedType", `This function should not await with the current leftmost type (allowed set: \{${validTypeSetString}\})`],
+    ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
+    ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
     ["Date.now", makeDateMessage("`Date.now()`")],
     ["Math.random", "Avoid calling `Math.random()` directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
@@ -226,14 +228,13 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
       return;
     }
 
-    const validSet = typesYouCanAwaitUponInDeterministicFunctions;
-    const awaitingOnAllowedType = validSet.has(typeName);
+    const awaitingOnAllowedType = awaitableTypes.has(typeName);
 
     if (!awaitingOnAllowedType) {
       /* We should be allowed to await if we call a function that passes
       an allowed type, since that probably means that that function is
       a helper function which is deterministic and uses our allowed type. */
-      if (ignoreAwaitsForCallsWithAContextParam && validTypeExistsInFunctionCallParams(functionCall, validSet)) {
+      if (ignoreAwaitsForCallsWithAContextParam && validTypeExistsInFunctionCallParams(functionCall, awaitableTypes)) {
         return;
       }
 
