@@ -29,9 +29,9 @@ type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServices
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
-const DETERMINISTIC_DECORATORS = new Set(["Workflow"]);
-const TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS = new Set(["WorkflowContext"]);
-const ERROR_MESSAGES = makeErrorMessageSet();
+const deterministicDecorators = new Set(["Workflow"]);
+const typesYouCanAwaitUponInDeterministicFunctions = new Set(["WorkflowContext"]);
+const errorMessages = makeErrorMessageSet();
 
 ////////// This is the set of error messages that can be emitted
 
@@ -42,7 +42,7 @@ function makeErrorMessageSet(): Map<string, string> {
   const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
-  const validTypeSetString = [...TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS].map((name) => `\`${name}\``).join(", ");
+  const validTypeSetString = [...typesYouCanAwaitUponInDeterministicFunctions].map((name) => `\`${name}\``).join(", ");
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
@@ -105,7 +105,7 @@ function evaluateClassForDeterminism(theClass: ClassDeclaration) {
 
 function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
   return fnDecl.getModifiers().some((modifier) =>
-    Node.isDecorator(modifier) && DETERMINISTIC_DECORATORS.has(modifier.getName())
+    Node.isDecorator(modifier) && deterministicDecorators.has(modifier.getName())
   );
 }
 
@@ -226,7 +226,7 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
       return;
     }
 
-    const validSet = TYPES_YOU_CAN_AWAIT_UPON_IN_DETERERMINISTIC_FUNCTIONS;
+    const validSet = typesYouCanAwaitUponInDeterministicFunctions;
     const awaitingOnAllowedType = validSet.has(typeName);
 
     if (!awaitingOnAllowedType) {
@@ -410,7 +410,7 @@ module.exports = {
       meta: {
         type: "suggestion",
         docs: { description: "Detect nondeterminism in cases where functions should act deterministically" },
-        messages: Object.fromEntries(ERROR_MESSAGES)
+        messages: Object.fromEntries(errorMessages)
       },
 
       create: (context: EslintContext) => {
