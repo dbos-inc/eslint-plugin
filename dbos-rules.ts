@@ -251,6 +251,8 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
     throw new Error("When would a function not have a body?");
   }
 
+  /* Could some stack contents stay around if an error
+  was thrown, and the appropriate frame was never popped? */
   const stack: Set<string>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Set());
