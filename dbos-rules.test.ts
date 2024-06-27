@@ -47,7 +47,7 @@ function makeExpectedDetCode(
     ${codeAboveClass}
 
     class Foo {
-      @Workflow
+      @Workflow()
       foo(${enclosingFunctionParams}) {
         ${code}
       }
@@ -79,7 +79,7 @@ const testSet: TestSet = [
       let y = {a: 1, b: 2};
 
       class Bar {
-        @Workflow
+        @Workflow()
         foo() {
           x = 4; // Not allowed
           y.a += 1; // Not allowed
@@ -93,14 +93,14 @@ const testSet: TestSet = [
           let z = 8;
 
           class Bar {
-            @Workflow
+            @Workflow()
             w() {
               z = 9; // Not allowed
             }
           }
         }
 
-        @Workflow
+        @Workflow()
         baz() {
           x *= 5; // Not allowed
           y.b += y.a; // Not allowed
