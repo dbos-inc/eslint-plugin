@@ -346,6 +346,8 @@ function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: Es
 isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName
 - Check function expressions and arrow functions for mutation (and interfaces?)
 - Check for recursive global mutation for expected-to-be-deterministic functions
+- Check for classes when assigned to a variable (like `const Foo = class ...`), and then scanning those
+- Modification of outer class variables (so a class in another one, modifying some other `OuterClass.field`)
 */
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is the ESLint plugin code (mostly boilerplate):

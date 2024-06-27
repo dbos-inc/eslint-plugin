@@ -82,6 +82,7 @@ const testSet: TestSet = [
         @Workflow()
         foo() {
           x = 4; // Not allowed
+          this.x = 4; // Allowed
           y.a += 1; // Not allowed
 
           let y = {a: 3, b: 4}; // Aliases the global 'y'
