@@ -128,6 +128,7 @@ const testSet: TestSet = [
       makeExpectedFailureTest("Date();", ["Date"]),
       makeExpectedFailureTest("new Date();", ["Date"]),
       makeExpectedFailureTest("Math.random();", ["Math.random"]),
+      makeExpectedFailureTest("console.log(\"Hello!\");", ["console.log"]),
       makeExpectedFailureTest("setTimeout(a, b);", ["setTimeout"]),
       makeExpectedFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
       makeExpectedFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
@@ -211,7 +212,7 @@ const testSet: TestSet = [
         "await fooBar.client<User>('users').select('password').where({ username }).first();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
-      ),
+      )
     ]
   ]
 ];

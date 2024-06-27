@@ -53,6 +53,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
     ["Date.now", makeDateMessage("`Date.now()`")],
     ["Math.random", "Avoid calling `Math.random()` directly; it can lead to non-reproducible behavior. See `@dbos-inc/communicator-random`"],
+    ["console.log", "Avoid calling `console.log` directly; the DBOS logger, `ctxt.logger.info`, is recommended."],
     ["setTimeout", "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"],
     ["bcrypt.hash", bcryptMessage],
     ["bcrypt.compare", bcryptMessage]
@@ -156,13 +157,18 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
 and mutating global arrays via functions like `push`, etc.? */
 const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
   // All of these function names are also keys in `ERROR_MESSAGES` above
-  const bannedFunctionsWithValidArgCounts: Map<string, Set<number>> = new Map([
-    ["Date",           new Set([0])],
-    ["Date.now",       new Set([0])],
-    ["Math.random",    new Set([0])],
-    ["setTimeout",     new Set([1, 2])],
-    ["bcrypt.hash",    new Set([3])],
-    ["bcrypt.compare", new Set([3])]
+
+  const AS_MANY_ARGS_AS_YOU_WANT = 99999;
+  type ArgCountRange = {min: number, max: number}; // This range is inclusive
+
+  const bannedFunctionsWithArgCountRanges: Map<string, ArgCountRange> = new Map([
+    ["Date",           {min: 0, max: 0}],
+    ["Date.now",       {min: 0, max: 0}],
+    ["Math.random",    {min: 0, max: 0}],
+    ["console.log",    {min: 0, max: AS_MANY_ARGS_AS_YOU_WANT}],
+    ["setTimeout",     {min: 1, max: AS_MANY_ARGS_AS_YOU_WANT}],
+    ["bcrypt.hash",    {min: 3, max: 3}],
+    ["bcrypt.compare", {min: 3, max: 3}]
   ]);
 
   //////////
@@ -174,12 +180,12 @@ const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
     const kids = expr.getChildren();
     const text = (kids.length === 0) ? expr.getText() : kids.map((node) => node.getText()).join("");
 
-    const validArgCounts = bannedFunctionsWithValidArgCounts.get(text);
+    const argCountRange = bannedFunctionsWithArgCountRanges.get(text);
 
-    if (validArgCounts !== undefined) {
+    if (argCountRange !== undefined) {
       const argCount = node.getArguments().length;
 
-      if (validArgCounts.has(argCount)) {
+      if (argCount >= argCountRange.min && argCount <= argCountRange.max) {
         return text; // Returning the function name key
       }
     }
