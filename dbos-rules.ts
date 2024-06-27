@@ -101,9 +101,9 @@ function reduceNodeToLeftmostLeaf(node: Node): Node {
   }
 }
 
-function evaluateClassForDeterminism(theClass: ClassDeclaration) {
-  theClass.getConstructors().forEach(evaluateFunctionForDeterminism);
-  theClass.getMethods().forEach(evaluateFunctionForDeterminism);
+function analyzeClassForDeterminism(theClass: ClassDeclaration) {
+  theClass.getConstructors().forEach(analyzeFunctionForDeterminism);
+  theClass.getMethods().forEach(analyzeFunctionForDeterminism);
 }
 
 function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
@@ -251,15 +251,20 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
+function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
   const body = fn.getBody();
 
   if (body === undefined) {
     throw new Error("When would a function not have a body?");
   }
 
-  /* Could some stack contents stay around if an error
-  was thrown, and the appropriate frame was never popped? */
+  /* Note that each stack is local to each function,
+  so it's reset when that happens (anything not on the stack
+  would be outside the function). Also note that no exceptions
+  should be caught in `analyzeFrame`, since this might result in
+  the stack ending up in a bad state (allowing any exceptions to
+  exit outside `analyzeFunctionForDeterminism`) would lead to the stack
+  getting reset. */
   const stack: Set<string>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Set());
@@ -268,22 +273,23 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
 
   const detCheckers: DetChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
-  function checkNodeForGlobalVarUsage(node: Node) {
+  function analyzeFrame(node: Node) {
     const locals = getCurrentFrame();
 
     if (Node.isClassDeclaration(node)) {
-      evaluateClassForDeterminism(node);
+      analyzeClassForDeterminism(node);
       return;
     }
     else if (Node.isFunctionDeclaration(node)) { // || Node.isArrowFunction(node)) {
       /* Not checking if this function should be deterministic
-      strictly, since it might have nondeterministic subfunctions */
-      evaluateFunctionForDeterminism(node);
+      strictly, since it might have nondeterministic subfunctions.
+      This also creates a new stack indirectly. */
+      analyzeFunctionForDeterminism(node);
       return;
     }
     else if (Node.isBlock(node)) {
       pushFrame();
-      node.forEachChild(checkNodeForGlobalVarUsage);
+      node.forEachChild(analyzeFrame);
       popFrame();
       return;
     }
@@ -308,10 +314,10 @@ function evaluateFunctionForDeterminism(fn: FunctionOrMethod) {
       // console.log("Not accounted for (nondet function)...");
     }
 
-    node.forEachChild(checkNodeForGlobalVarUsage);
+    node.forEachChild(analyzeFrame);
   }
 
-  body.forEachChild(checkNodeForGlobalVarUsage);
+  body.forEachChild(analyzeFrame);
 }
 
 ////////// This is the entrypoint for running the determinism analysis with `ts-morph`
@@ -329,8 +335,8 @@ function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: Es
 
   try {
     if (Node.isSourceFile(tsMorphNode)) {
-      tsMorphNode.getFunctions().forEach(evaluateFunctionForDeterminism);
-      tsMorphNode.getClasses().forEach(evaluateClassForDeterminism);
+      tsMorphNode.getFunctions().forEach(analyzeFunctionForDeterminism);
+      tsMorphNode.getClasses().forEach(analyzeClassForDeterminism);
     }
     else {
       throw new Error("Was expecting a source file to be passed to `analyzeSourceNodeForDeterminism`!");
@@ -411,7 +417,7 @@ const extConfig = {
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
-    version: "1.0.2"
+    version: "1.0.3"
   },
 
   rules: {
