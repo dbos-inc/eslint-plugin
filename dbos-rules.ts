@@ -259,12 +259,14 @@ function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
   }
 
   /* Note that each stack is local to each function,
-  so it's reset when that happens (anything not on the stack
-  would be outside the function). Also note that no exceptions
-  should be caught in `analyzeFrame`, since this might result in
-  the stack ending up in a bad state (allowing any exceptions to
-  exit outside `analyzeFunctionForDeterminism`) would lead to the stack
-  getting reset. */
+  so it's reset when a new function is entered
+  (anything not on the stack would be outside the function).
+
+  Also note that no exceptions should be caught in `analyzeFrame`,
+  since this might result in the stack ending up in a bad state (allowing
+  any exceptions to exit outside `analyzeFunctionForDeterminism` would lead
+  to the stack getting reset if `analyzeFunctionForDeterminism` is called again). */
+
   const stack: Set<string>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Set());
