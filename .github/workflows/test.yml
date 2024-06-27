@@ -18,6 +18,7 @@ jobs:
         run: |
           npm install
           npm test
+          bash e2e_test.bash
         env:
           NPM_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
           SILENCE_LOGS: true
