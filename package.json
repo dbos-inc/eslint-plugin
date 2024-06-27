@@ -1,29 +1,35 @@
 {
   "name": "@dbos-inc/eslint-plugin",
-  "version": "0.0.6",
+  "version": "1.0.0",
   "description": "eslint plugin for DBOS SDK",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/dbos-inc/eslint-plugin"
   },
-  "main": "dbos-rules.js",
+  "main": "dist/dbos-rules.js",
+  "types": "dist/dbos-rules.d.ts",
   "homepage": "https://docs.dbos.dev/",
   "scripts": {
-    "test": "node dbos-rules.test.js"
-  },
-  "peerDependencies": {
-    "eslint": ">=8.0.0"
+    "build": "tsc",
+    "test": "vitest"
   },
   "dependencies": {
-    "eslint": "^8.56.0",
-    "eslint-plugin-security": "^2.1.0",
+    "@types/node": "^20.14.6",
+    "@typescript-eslint/eslint-plugin": "^7.13.1",
+    "@typescript-eslint/parser": "^7.13.1",
+    "@typescript-eslint/utils": "^7.13.1",
     "eslint-plugin-no-secrets": "^0.8.9",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.10.0"
+    "eslint-plugin-security": "^2.1.0",
+    "ts-morph": "^22.0.0",
+    "typescript": "^5.4.5"
   },
   "keywords": [
     "eslint",
     "eslintplugin"
-  ]
+  ],
+  "devDependencies": {
+    "@typescript-eslint/rule-tester": "^7.14.1",
+    "vitest": "^1.6.0"
+  }
 }
