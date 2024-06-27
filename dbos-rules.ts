@@ -153,7 +153,7 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
   }
 }
 
-/* TODO: should I ban IO functions, like `fetch`, `console.log`,
+/* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
 const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
   // All of these function names are also keys in `ERROR_MESSAGES` above
