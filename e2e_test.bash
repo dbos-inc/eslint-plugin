@@ -1,5 +1,9 @@
 #!/bin/bash
 
+log() {
+  echo -e "\n>>>>>>>>>> $1\n"
+}
+
 fail() {
   echo "$1"
   exit 1
@@ -12,31 +16,68 @@ try_command() {
 
 ####################################################################################################
 
+# TODO: clean up the works/fails comments later
 directories=(
-  e-commerce/payment-backend e-commerce/shop-backend e-commerce/shop-frontend
-  greeting-emails shop-guide tpcc widget-store yky-social
+  e-commerce/payment-backend # Works
+  e-commerce/shop-backend # Works (but emits some relevant warnings to fix)
+  e-commerce/shop-frontend # Works
+
+  greeting-emails # Fails
+  shop-guide # Fails
+  tpcc # Fails
+  widget-store # Works (but emits a warning; not specific to my linter rules though; I should still fix it)
+  yky-social # Works (but emits a warning; not specific to my linter rules though; I should still fix it)
 )
 
-# TODO: will I have `jq` available in the CI environment?
 orig_dir="$PWD"
-version=$(try_command "jq -r '.version' package.json")
+demo_apps_dir="dbos-demo-apps"
+all_lints_succeeded=true
 
-tarball_name="dbos-inc-eslint-plugin-$version.tgz"
+plugin_version=$(try_command "jq -r '.version' package.json")
+tarball_name="dbos-inc-eslint-plugin-$plugin_version.tgz"
 tarball_path="$orig_dir/$tarball_name"
+
+####################################################################################################
+
+maybe_remove_demo_apps_dir() {
+  if [[ -d "$demo_apps_dir" ]]; then
+
+    log "Removing the demo apps directory"
+
+    # Uncomment when running locally!
+    # try_command "rm -r $demo_apps_dir"
+  fi
+}
+
 
 try_command "tsc"
 try_command "npm pack"
-try_command "git clone https://github.com/dbos-inc/dbos-demo-apps"
+
+maybe_remove_demo_apps_dir
+try_command "git clone https://github.com/dbos-inc/$demo_apps_dir"
 
 for directory in "${directories[@]}"; do
-  echo ">>>>>>>>>> Running e2e test for $directory"
-
-  try_command "cd dbos-demo-apps/$directory"
+  try_command "cd $demo_apps_dir/$directory"
   try_command "cp $tarball_path ."
   try_command "npm install $tarball_name"
-  try_command "npm run lint"
+
+  npm run lint
+  lint_result="$?"
+
+  if [[ "$lint_result" -ne 0 ]]; then
+    all_lints_succeeded=false
+  fi
+
+  log "Exit code for linting '$directory': $lint_result"
 
   try_command "cd $orig_dir"
 done
+
+maybe_remove_demo_apps_dir
+log "Finished the e2e test"
+
+if [[ "$all_lints_succeeded" = false ]]; then
+  exit 1
+fi
 
 ####################################################################################################
