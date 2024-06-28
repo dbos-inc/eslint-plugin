@@ -325,7 +325,7 @@ function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
 ////////// This is the entrypoint for running the determinism analysis with `ts-morph`
 
 function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: EslintContext) {
-  const parserServices = ESLintUtils.getParserServices(eslintContext);
+  const parserServices = ESLintUtils.getParserServices(eslintContext, false);
 
   GLOBAL_TOOLS = {
     eslintContext: eslintContext,
@@ -336,12 +336,12 @@ function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: Es
   const tsMorphNode = makeTsMorphNode(eslintNode);
 
   try {
-    if (Node.isSourceFile(tsMorphNode)) {
+    if (Node.isStatemented(tsMorphNode)) {
       tsMorphNode.getFunctions().forEach(analyzeFunctionForDeterminism);
       tsMorphNode.getClasses().forEach(analyzeClassForDeterminism);
     }
     else {
-      throw new Error("Was expecting a source file to be passed to `analyzeSourceNodeForDeterminism`!");
+      throw new Error(`Was expecting a statemented node! Got this kind instead: ${tsMorphNode.getKindName()}`);
     }
   }
   finally {
