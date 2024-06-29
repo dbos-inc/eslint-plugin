@@ -1,9 +1,8 @@
-import { TypeChecker } from "typescript";
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
 import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 
 import {
-  createWrappedNode, Node, FunctionDeclaration,
+  ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
   MethodDeclaration
 } from "ts-morph";
@@ -15,6 +14,12 @@ const noSecrets = require("eslint-plugin-no-secrets");
 type EslintNode = TSESTree.Node;
 type EslintContext = TSESLint.RuleContext<string, unknown[]>;
 
+/*
+Note for upgrading `ts-morph` and `typescript` in `package.json`:
+1. Make sure that the supported TypeScript version for `ts-morph` is the one installed here.
+2. Make sure that the installed TypeScript version works with `dbos-demo-apps` (TypeScript 5.5 + ts-morph 23.0 caused some breakage there).
+*/
+
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
 ////////// These are some shared types and values used throughout the code
@@ -25,7 +30,7 @@ type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDec
 // This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
 type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
-type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: TypeChecker};
+type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
@@ -114,8 +119,16 @@ function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
 
 // Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
 function makeTsMorphNode(eslintNode: EslintNode): Node {
-  const compilerNode = GLOBAL_TOOLS!.parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
-  return createWrappedNode(compilerNode);
+  const parserServices = GLOBAL_TOOLS!.parserServices;
+  const compilerNode = parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
+
+  const options = {
+    compilerOptions: parserServices.program.getCompilerOptions(),
+    sourceFile: compilerNode.getSourceFile(),
+    typeChecker: GLOBAL_TOOLS!.typeChecker
+  };
+
+  return createWrappedNode(compilerNode, options);
 }
 
 function makeEslintNode(tsMorphNode: Node): EslintNode {
@@ -367,7 +380,7 @@ const baseConfig = {
     "no-secrets"
   ],
 
-  env: { "node" : true },
+  env: { "node": true },
 
   rules: {
     "no-eval": "error",

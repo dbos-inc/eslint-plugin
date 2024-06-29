@@ -16,17 +16,16 @@ try_command() {
 
 ####################################################################################################
 
-# TODO: clean up the works/fails comments later
 directories=(
-  e-commerce/payment-backend # Works
-  e-commerce/shop-backend # Works (but emits some relevant warnings to fix)
-  e-commerce/shop-frontend # Works
+  e-commerce/payment-backend
+  e-commerce/shop-backend
+  e-commerce/shop-frontend
 
-  greeting-emails # Fails
-  shop-guide # Fails
-  tpcc # Fails
-  widget-store # Works (but emits a warning; not specific to my linter rules though; I should still fix it)
-  yky-social # Works (but emits a warning; not specific to my linter rules though; I should still fix it)
+  greeting-emails
+  shop-guide
+  tpcc
+  widget-store
+  yky-social
 )
 
 orig_dir="$PWD"
@@ -49,11 +48,11 @@ maybe_remove_demo_apps_dir() {
   fi
 }
 
+maybe_remove_demo_apps_dir
 
 try_command "tsc"
 try_command "npm pack"
 
-maybe_remove_demo_apps_dir
 try_command "git clone https://github.com/dbos-inc/$demo_apps_dir"
 
 for directory in "${directories[@]}"; do
