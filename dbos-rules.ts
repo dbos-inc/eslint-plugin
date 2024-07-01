@@ -432,7 +432,7 @@ const extConfig = {
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
-    version: "1.0.3"
+    version: "1.0.4"
   },
 
   rules: {
