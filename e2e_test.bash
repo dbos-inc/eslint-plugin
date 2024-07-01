@@ -38,22 +38,22 @@ tarball_path="$orig_dir/$tarball_name"
 
 ####################################################################################################
 
-maybe_remove_demo_apps_dir() {
+prepare_demo_apps_dir() {
   if [[ -d "$demo_apps_dir" ]]; then
-
-    log "Removing the demo apps directory"
-
-    # Uncomment when running locally!
-    # try_command "rm -r $demo_apps_dir"
+    # This is here so that running the test locally won't involve a re-clone
+    try_command "cd $demo_apps_dir"
+    try_command "git restore ." # Cleaning up any changes made
+    try_command "git pull" # Pulling the latest changes
+    try_command "cd .."
+  else
+    try_command "git clone https://github.com/dbos-inc/$demo_apps_dir"
   fi
 }
-
-maybe_remove_demo_apps_dir
 
 try_command "tsc"
 try_command "npm pack"
 
-try_command "git clone https://github.com/dbos-inc/$demo_apps_dir"
+prepare_demo_apps_dir
 
 for directory in "${directories[@]}"; do
   try_command "cd $demo_apps_dir/$directory"
@@ -72,7 +72,6 @@ for directory in "${directories[@]}"; do
   try_command "cd $orig_dir"
 done
 
-maybe_remove_demo_apps_dir
 log "Finished the e2e test"
 
 if [[ "$all_lints_succeeded" = false ]]; then
