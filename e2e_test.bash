@@ -16,7 +16,11 @@ try_command() {
 
 ####################################################################################################
 
+# This list should be extended as more demos are written!
 directories=(
+  bank/bank-backend
+  # bank/bank-frontend
+
   e-commerce/payment-backend
   e-commerce/shop-backend
   e-commerce/shop-frontend
