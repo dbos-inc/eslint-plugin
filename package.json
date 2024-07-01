@@ -1,6 +1,6 @@
 {
   "name": "@dbos-inc/eslint-plugin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "eslint plugin for DBOS SDK",
   "license": "MIT",
   "repository": {
@@ -16,13 +16,13 @@
   },
   "dependencies": {
     "@types/node": "^20.14.6",
-    "@typescript-eslint/eslint-plugin": "^7.13.1",
-    "@typescript-eslint/parser": "^7.13.1",
-    "@typescript-eslint/utils": "^7.13.1",
+    "@typescript-eslint/eslint-plugin": "7.14",
+    "@typescript-eslint/parser": "7.14",
+    "@typescript-eslint/utils": "7.14",
     "eslint-plugin-no-secrets": "^0.8.9",
     "eslint-plugin-security": "^2.1.0",
-    "ts-morph": "^22.0.0",
-    "typescript": "^5.4.5"
+    "ts-morph": "22.0",
+    "typescript": "5.4"
   },
   "keywords": [
     "eslint",
@@ -31,5 +31,8 @@
   "devDependencies": {
     "@typescript-eslint/rule-tester": "^7.14.1",
     "vitest": "^1.6.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.9.5"
   }
 }
