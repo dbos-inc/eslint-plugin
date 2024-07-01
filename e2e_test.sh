@@ -47,7 +47,6 @@ prepare_demo_apps_dir() {
 
 tsc
 npm pack
-
 prepare_demo_apps_dir
 
 for directory in "${directories[@]}"; do
