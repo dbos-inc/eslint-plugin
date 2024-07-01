@@ -1,17 +1,8 @@
 #!/bin/bash
+set -ex
 
 log() {
   echo -e "\n>>>>> $1\n"
-}
-
-fail() {
-  echo "$1"
-  exit 1
-}
-
-# Wrapping every command in this, in order to avoid a cascasing pile of errors
-try_command() {
-  eval "$1" || fail "This command failed: '$1'"
 }
 
 ####################################################################################################
@@ -36,7 +27,7 @@ orig_dir="$PWD"
 demo_apps_dir="dbos-demo-apps"
 all_lints_succeeded=true
 
-plugin_version=$(try_command "jq -r '.version' package.json")
+plugin_version=$(jq -r '.version' package.json)
 tarball_name="dbos-inc-eslint-plugin-$plugin_version.tgz"
 tarball_path="$orig_dir/$tarball_name"
 
@@ -45,27 +36,30 @@ tarball_path="$orig_dir/$tarball_name"
 prepare_demo_apps_dir() {
   if [[ -d "$demo_apps_dir" ]]; then
     # This is here so that running the test locally won't involve a re-clone
-    try_command "cd $demo_apps_dir"
-    try_command "git restore ." # Cleaning up any changes made
-    try_command "git pull" # Pulling the latest changes
-    try_command "cd .."
+    cd "$demo_apps_dir"
+    git restore . # Removing any changes made
+    git pull # Pulling the latest changes
+    cd ..
   else
-    try_command "git clone https://github.com/dbos-inc/$demo_apps_dir"
+    git clone "https://github.com/dbos-inc/$demo_apps_dir"
   fi
 }
 
-try_command "tsc"
-try_command "npm pack"
+tsc
+npm pack
 
 prepare_demo_apps_dir
 
 for directory in "${directories[@]}"; do
-  try_command "cd $demo_apps_dir/$directory"
-  try_command "cp $tarball_path ."
-  try_command "npm install $tarball_name"
+  cd "$demo_apps_dir/$directory"
+  cp "$tarball_path" .
+  npm install "$tarball_name"
 
+  # Turning off error checking temporarily
+  set +e
   npm run lint
   lint_result="$?"
+  set -e
 
   if [[ "$lint_result" -ne 0 ]]; then
     all_lints_succeeded=false
@@ -73,7 +67,7 @@ for directory in "${directories[@]}"; do
 
   log "Exit code for linting '$directory': $lint_result"
 
-  try_command "cd $orig_dir"
+  cd "$orig_dir"
 done
 
 log "Finished the e2e test"
