@@ -385,7 +385,6 @@ const baseConfig = {
   rules: {
     "no-eval": "error",
     "@typescript-eslint/no-implied-eval": "error",
-    "no-console": "error",
     "security/detect-unsafe-regex": "error",
     "no-secrets/no-secrets": "error",
     "@dbos-inc/detect-nondeterministic-calls": "error"
@@ -432,7 +431,7 @@ const extConfig = {
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
-    version: "1.0.4"
+    version: "1.0.5"
   },
 
   rules: {
