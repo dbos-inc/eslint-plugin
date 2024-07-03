@@ -399,7 +399,7 @@ const recConfig = {
 
   extends: [
     ...baseConfig.extends,
-    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "plugin:@typescript-eslint/recommended-type-checked",
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended"
   ],
