@@ -24,7 +24,7 @@ type SuccessTest = ArrayElementType<SuccessTests>;
 type FailureTest = ArrayElementType<FailureTests>;
 
 function doTest(title: string, successTests: SuccessTests, failureTests: FailureTests) {
-  const ruleName = "detect-nondeterministic-calls";
+  const ruleName = "dbos-static-analysis";
   tester.run(title, dbosRulesPerName[ruleName], { valid: successTests, invalid: failureTests });
 }
 
