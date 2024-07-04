@@ -106,9 +106,9 @@ function reduceNodeToLeftmostLeaf(node: Node): Node {
   }
 }
 
-function analyzeClassForDeterminism(theClass: ClassDeclaration) {
-  theClass.getConstructors().forEach(analyzeFunctionForDeterminism);
-  theClass.getMethods().forEach(analyzeFunctionForDeterminism);
+function analyzeClass(theClass: ClassDeclaration) {
+  theClass.getConstructors().forEach(analyzeFunction);
+  theClass.getMethods().forEach(analyzeFunction);
 }
 
 function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
@@ -264,7 +264,8 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
+// At the moment, this only performs analysis on expected-to-be-deterministic functions
+function analyzeFunction(fn: FunctionOrMethod) {
   const body = fn.getBody();
 
   if (body === undefined) {
@@ -292,14 +293,14 @@ function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
     const locals = getCurrentFrame();
 
     if (Node.isClassDeclaration(node)) {
-      analyzeClassForDeterminism(node);
+      analyzeClass(node);
       return;
     }
     else if (Node.isFunctionDeclaration(node)) { // || Node.isArrowFunction(node)) {
       /* Not checking if this function should be deterministic
       strictly, since it might have nondeterministic subfunctions.
       This also creates a new stack indirectly. */
-      analyzeFunctionForDeterminism(node);
+      analyzeFunction(node);
       return;
     }
     else if (Node.isBlock(node)) {
@@ -337,7 +338,7 @@ function analyzeFunctionForDeterminism(fn: FunctionOrMethod) {
 
 ////////// This is the entrypoint for running the determinism analysis with `ts-morph`
 
-function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: EslintContext) {
+function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   const parserServices = ESLintUtils.getParserServices(eslintContext, false);
 
   GLOBAL_TOOLS = {
@@ -350,8 +351,8 @@ function analyzeRootNodeForDeterminism(eslintNode: EslintNode, eslintContext: Es
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
-      tsMorphNode.getFunctions().forEach(analyzeFunctionForDeterminism);
-      tsMorphNode.getClasses().forEach(analyzeClassForDeterminism);
+      tsMorphNode.getFunctions().forEach(analyzeFunction);
+      tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
       throw new Error(`Was expecting a statemented node! Got this kind instead: ${tsMorphNode.getKindName()}`);
@@ -387,7 +388,7 @@ const baseConfig = {
     "@typescript-eslint/no-implied-eval": "error",
     "security/detect-unsafe-regex": "error",
     "no-secrets/no-secrets": "error",
-    "@dbos-inc/detect-nondeterministic-calls": "error"
+    "@dbos-inc/dbos-static-analysis": "error"
   },
 
   extends: []
@@ -398,7 +399,7 @@ const recConfig = {
 
   extends: [
     ...baseConfig.extends,
-    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "plugin:@typescript-eslint/recommended-type-checked",
     "eslint:recommended",
     "plugin:@typescript-eslint/recommended"
   ],
@@ -417,28 +418,17 @@ const recConfig = {
   }
 };
 
-const extConfig = {
-  ...recConfig,
-
-  extends: [...recConfig.extends],
-
-  rules: {
-    ...recConfig.rules,
-    "@typescript-eslint/no-shadow": "error"
-  },
-};
-
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
-    version: "1.0.5"
+    version: "1.1.5"
   },
 
   rules: {
-    "detect-nondeterministic-calls": {
+    "dbos-static-analysis": {
       meta: {
         type: "suggestion",
-        docs: { description: "Detect nondeterminism in cases where functions should act deterministically" },
+        docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
         messages: Object.fromEntries(errorMessages)
       },
 
@@ -448,7 +438,7 @@ module.exports = {
           stronger typing, and it's easier to work with the AST
           than ESTree's limited tree navigation. */
           Program(node: EslintNode) {
-            analyzeRootNodeForDeterminism(node, context);
+            analyzeRootNode(node, context);
           }
         }
       }
@@ -462,9 +452,9 @@ module.exports = {
   },
 
   configs: {
-    dbosBaseConfig: baseConfig,
+    dbosBaseConfig: recConfig, // This is deprecated!
     dbosRecommendedConfig: recConfig,
-    dbosExtendedConfig: extConfig
+    dbosExtendedConfig: recConfig // This is deprecated!
   }
 };
 
