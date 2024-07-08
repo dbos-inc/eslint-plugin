@@ -149,7 +149,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   return GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode).getSymbol()?.getName();
 }
 
-////////// These functions are the determinism heuristics that I've written
+////////// These functions are the determinism and SQL injection heuristics that I've written
 
 const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
   if (Node.isExpressionStatement(node)) {
