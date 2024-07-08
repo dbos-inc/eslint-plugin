@@ -70,11 +70,20 @@ function makeExpectedDetFailureTest(code: string, expectedErrorIds: string[],
 
 function makeSqlInjectionTest(code: string): FailureTest {
   return {code: `
-    class TransactionContext {}
+    class UserDatabaseClient {}
+    class DBOSContext {}
+
+    interface Knex {
+      raw: number;
+    }
+
+    export interface TransactionContext<T extends UserDatabaseClient> extends DBOSContext {
+      readonly client: T;
+    }
 
     class Foo {
       @Transaction()
-      injectionTime(ctxt: TransactionContext) {
+      injectionTime(ctxt: TransactionContext<Knex>) {
         ${code}
       }
     }
@@ -85,7 +94,10 @@ function makeSqlInjectionTest(code: string): FailureTest {
 
 const testSet: TestSet = [
   ["sql injection", [], [
-    makeSqlInjectionTest("const x = 'SELECT * FROM users WHERE username = bob';"),
+    makeSqlInjectionTest(`
+      const x = 'SELECT * FROM users WHERE username = bob';
+      ctxt.client.raw(x);
+    `),
   ]],
 
   ["global mutations", [],

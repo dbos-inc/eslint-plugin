@@ -4,7 +4,7 @@ import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } fr
 import {
   ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
-  MethodDeclaration
+  MethodDeclaration, SyntaxKind
 } from "ts-morph";
 
 // Should I find TypeScript variants of these?
@@ -145,6 +145,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
+  // return tsMorphNode.getType().getSymbol()?.getName(); // TODO: why does this work again now?
   return GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode).getSymbol()?.getName();
 }
 
@@ -265,10 +266,45 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
   }
 }
 
-const hasSqlInjection: ErrorChecker = (_node, _fn, _isLocal) => {
-  // TODO: flesh this out more
-  if (Node.isStringLiteral(_node)) {
-    return "sqlInjection";
+const isSqlInjection: ErrorChecker = (node, _fn, _isLocal) => {
+  // TODO: match these more robustly later
+  if (Node.isCallExpression(node)) {
+    const subexpr = node.getExpression();
+
+    const identifiers = subexpr.getDescendantsOfKind(SyntaxKind.Identifier);
+
+    if (identifiers.length === 0) {
+      return;
+    }
+
+    // const text = identifiers.map((node) => node.getText());
+    const typeNames = identifiers.map(getTypeNameForTsMorphNode);
+
+    // In this case, not a valid SQL query
+    if (typeNames[0] !== "TransactionContext") {
+      return;
+    }
+
+    // TODO: do I need bounds checking?
+    const maybeClientName = typeNames[1];
+
+    // TODO: now implement checking for the different function call variants
+    switch (maybeClientName) {
+      case "PoolClient":
+        throw new Error(`${maybeClientName} not implemented yet`);
+      case "PrismaClient":
+        throw new Error(`${maybeClientName} not implemented yet`);
+      case "TypeORMEntityManager":
+        throw new Error(`${maybeClientName} not implemented yet`);
+      case "Knex":
+        throw new Error(`${maybeClientName} not implemented yet`);
+      case undefined:
+        return;
+      default:
+        throw new Error("Unsupported client name: " + maybeClientName)
+    }
+
+    return undefined;
   }
 }
 
@@ -337,7 +373,7 @@ function analyzeFunction(fn: FunctionOrMethod) {
       // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
     }
     else if (functionHasDecoratorInSet(fn, checkSqlInjectionDecorators)) {
-      runErrorChecker(hasSqlInjection, node);
+      runErrorChecker(isSqlInjection, node);
     }
     else {
       // console.log("Not accounted for (nondet function)...");
