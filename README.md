@@ -1,9 +1,9 @@
-# DBOS typescript-eslint plugin
-typescript-eslint plugin for DBOS SDK
+# DBOS eslint plugin
+eslint plugin for DBOS SDK
 
 The [DBOS SDK](https://github.com/dbos-inc/dbos-ts) (from [DBOS, Inc.](https://dbos.dev)) is a **Typescript framework built on the database** that helps you develop transactional backend applications.
 
-This [typescript-eslint](https://typescript-eslint.io/) plugin assists in the following aspects of coding:
+This [eslint](https://eslint.org/)/[typescript-eslint](https://typescript-eslint.io/) plugin assists in the following aspects of coding:
 - Correct use of the DBOS SDK
 - Conformance to TypeScript best practices
 - Identification of code that may contain security vulnerabilities and unexpected nondeterminism
@@ -12,7 +12,7 @@ This [typescript-eslint](https://typescript-eslint.io/) plugin assists in the fo
 
 The fastest way to get started with DBOS is by following the [quickstart](https://docs.dbos.dev/getting-started/quickstart), where you'll learn how to get a backend running in less than five minutes.
 
-The tutorial and examples include setup of `typescript-eslint` with this plugin.
+The tutorial and examples include setup of `eslint` with this plugin.
 
 ## Additional Documentation
 
