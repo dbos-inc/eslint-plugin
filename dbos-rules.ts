@@ -28,7 +28,7 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 
 // This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
-type DetChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
+type ErrorChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
 
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
@@ -37,6 +37,7 @@ let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 const deterministicDecorators = new Set(["Workflow"]);
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const errorMessages = makeErrorMessageSet();
+const checkSqlInjectionDecorators = new Set(["TransactionContext"])
 
 ////////// This is the set of error messages that can be emitted
 
@@ -53,6 +54,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
+    ["sqlInjection", "Possible SQL injection detected! Use prepared statements instead"],
     ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -111,9 +113,9 @@ function analyzeClass(theClass: ClassDeclaration) {
   theClass.getMethods().forEach(analyzeFunction);
 }
 
-function functionShouldBeDeterministic(fnDecl: FunctionOrMethod): boolean {
+function functionHasDecoratorInSet(fnDecl: FunctionOrMethod, decoratorSet: Set<string>): boolean {
   return fnDecl.getModifiers().some((modifier) =>
-    Node.isDecorator(modifier) && deterministicDecorators.has(modifier.getName())
+    Node.isDecorator(modifier) && decoratorSet.has(modifier.getName())
   );
 }
 
@@ -148,7 +150,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
 
 ////////// These functions are the determinism heuristics that I've written
 
-const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
+const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
   if (Node.isExpressionStatement(node)) {
     const subexpr = node.getExpression();
 
@@ -168,7 +170,7 @@ const mutatesGlobalVariable: DetChecker = (node, _fn, isLocal) => {
 
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
-const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
+const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
   // All of these function names are also keys in `ERROR_MESSAGES` above
 
   const AS_MANY_ARGS_AS_YOU_WANT = 99999;
@@ -204,7 +206,8 @@ const callsBannedFunction: DetChecker = (node, _fn, _isLocal) => {
     }
   }
 }
-const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
+
+const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
 
   ////////// This is a little utility function used below
@@ -262,6 +265,10 @@ const awaitsOnNotAllowedType: DetChecker = (node, _fn, _isLocal) => {
   }
 }
 
+const checkSqlInjection: ErrorChecker = (_node, _fn, _isLocal) => {
+  return "sqlInjection";
+}
+
 ////////// This is the main function that recurs on the `ts-morph` AST
 
 // At the moment, this only performs analysis on expected-to-be-deterministic functions
@@ -278,8 +285,8 @@ function analyzeFunction(fn: FunctionOrMethod) {
 
   Also note that no exceptions should be caught in `analyzeFrame`,
   since this might result in the stack ending up in a bad state (allowing
-  any exceptions to exit outside `analyzeFunctionForDeterminism` would lead
-  to the stack getting reset if `analyzeFunctionForDeterminism` is called again). */
+  any exceptions to exit outside `analyzeFunction` would lead
+  to the stack getting reset if `analyzeFunction` is called again). */
 
   const stack: Set<string>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
@@ -287,7 +294,16 @@ function analyzeFunction(fn: FunctionOrMethod) {
   const popFrame = () => stack.pop();
   const isLocal = (name: string) => stack.some((frame) => frame.has(name));
 
-  const detCheckers: DetChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
+  const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
+
+  function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
+    const messageKey = errorChecker(node, fn, isLocal);
+
+    if (messageKey !== undefined) {
+      const correspondingEslintNode = makeEslintNode!(node);
+      GLOBAL_TOOLS!.eslintContext.report({ node: correspondingEslintNode, messageId: messageKey });
+    }
+  }
 
   function analyzeFrame(node: Node) {
     const locals = getCurrentFrame();
@@ -313,18 +329,12 @@ function analyzeFunction(fn: FunctionOrMethod) {
     else if (Node.isVariableDeclaration(node)) {
       locals.add(node.getName());
     }
-    else if (functionShouldBeDeterministic(fn)) {
-
-      detCheckers.forEach((detChecker) => {
-        const messageKey = detChecker(node, fn, isLocal);
-
-        if (messageKey !== undefined) {
-          const correspondingEslintNode = makeEslintNode!(node);
-          GLOBAL_TOOLS!.eslintContext.report({ node: correspondingEslintNode, messageId: messageKey });
-        }
-      });
-
+    else if (functionHasDecoratorInSet(fn, deterministicDecorators)) {
+      detCheckers.forEach((detChecker) => runErrorChecker(detChecker, node));
       // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
+    }
+    else if (functionHasDecoratorInSet(fn, checkSqlInjectionDecorators)) {
+      runErrorChecker(checkSqlInjection, node);
     }
     else {
       // console.log("Not accounted for (nondet function)...");

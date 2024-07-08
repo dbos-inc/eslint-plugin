@@ -55,13 +55,13 @@ function makeExpectedDetCode(
   `;
 }
 
-function makeExpectedSuccessTest(code: string,
+function makeExpectedDetSuccessTest(code: string,
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
 
   return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams) };
 }
 
-function makeExpectedFailureTest(code: string, expectedErrorIds: string[],
+function makeExpectedDetFailureTest(code: string, expectedErrorIds: string[],
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
 
   const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
@@ -73,7 +73,7 @@ function makeExpectedFailureTest(code: string, expectedErrorIds: string[],
 const testSet: TestSet = [
   ["global mutations", [],
 
-    [makeExpectedFailureTest(
+    [makeExpectedDetFailureTest(
       `
       let x = 3;
       let y = {a: 1, b: 2};
@@ -118,50 +118,50 @@ const testSet: TestSet = [
 
   ["banned/not banned functions",
     [
-      makeExpectedSuccessTest("foo();"), // Calling these `Date` variants is allowed
-      makeExpectedSuccessTest("Date('December 17, 1995 03:24:00');"),
-      makeExpectedSuccessTest("new Date('December 17, 1995 03:24:00');")
+      makeExpectedDetSuccessTest("foo();"), // Calling these `Date` variants is allowed
+      makeExpectedDetSuccessTest("Date('December 17, 1995 03:24:00');"),
+      makeExpectedDetSuccessTest("new Date('December 17, 1995 03:24:00');")
     ],
 
     [
       /* The secondary args here are the expected error
       IDs (which line up with the banned functions tested) */
-      makeExpectedFailureTest("Date();", ["Date"]),
-      makeExpectedFailureTest("new Date();", ["Date"]),
-      makeExpectedFailureTest("Math.random();", ["Math.random"]),
-      makeExpectedFailureTest("console.log(\"Hello!\");", ["console.log"]),
-      makeExpectedFailureTest("setTimeout(a, b);", ["setTimeout"]),
-      makeExpectedFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
-      makeExpectedFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
+      makeExpectedDetFailureTest("Date();", ["Date"]),
+      makeExpectedDetFailureTest("new Date();", ["Date"]),
+      makeExpectedDetFailureTest("Math.random();", ["Math.random"]),
+      makeExpectedDetFailureTest("console.log(\"Hello!\");", ["console.log"]),
+      makeExpectedDetFailureTest("setTimeout(a, b);", ["setTimeout"]),
+      makeExpectedDetFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
+      makeExpectedDetFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
     ]
   ],
 
   ["allowed/not allowed awaits",
     [
 
-      makeExpectedSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
-      makeExpectedSuccessTest("await new Set();"), // TODO: definitely make this not allowed
+      makeExpectedDetSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
+      makeExpectedDetSuccessTest("await new Set();"), // TODO: definitely make this not allowed
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #1
-      makeExpectedSuccessTest(
+      makeExpectedDetSuccessTest(
         "await ctxt.foo();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
-      makeExpectedSuccessTest(
+      makeExpectedDetSuccessTest(
         "await ctxt.invoke(ShopUtilities).retrieveOrder(order_id);",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #3
-      makeExpectedSuccessTest(
+      makeExpectedDetSuccessTest(
         "await ctxt.client<User>('users').select('password').where({ username }).first();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a leftmost non-`WorkflowContext` type, but you pass a `WorkflowContext` in
-      makeExpectedSuccessTest(
+      makeExpectedDetSuccessTest(
         `
         async function workflowHelperFunction(ctxt: WorkflowContext) {
           return await ctxt.baz();
@@ -175,10 +175,10 @@ const testSet: TestSet = [
 
     [
       // Awaiting on a not-allowed function, #1
-      makeExpectedFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
+      makeExpectedDetFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
 
       // Awaiting on a not-allowed function, #2
-      makeExpectedFailureTest(`
+      makeExpectedDetFailureTest(`
         async function foo() {
           return 5;
         }
@@ -189,27 +189,27 @@ const testSet: TestSet = [
       ),
 
       // Awaiting on a not-allowed class, #1
-      makeExpectedFailureTest(
+      makeExpectedDetFailureTest(
         "const x = new Set(); await x.foo();",
         ["awaitingOnNotAllowedType"]
       ),
 
       // Awaiting on a not-allowed class, #2
-      makeExpectedFailureTest(
+      makeExpectedDetFailureTest(
         "await fooBar.foo();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #3
-      makeExpectedFailureTest(
+      makeExpectedDetFailureTest(
         "await fooBar.invoke(ShopUtilities).retrieveOrder(order_id);",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #4
-      makeExpectedFailureTest(
+      makeExpectedDetFailureTest(
         "await fooBar.client<User>('users').select('password').where({ username }).first();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
