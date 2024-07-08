@@ -68,9 +68,26 @@ function makeExpectedDetFailureTest(code: string, expectedErrorIds: string[],
   return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
 }
 
+function makeSqlInjectionTest(code: string): FailureTest {
+  return {code: `
+    class TransactionContext {}
+
+    class Foo {
+      @Transaction()
+      injectionTime(ctxt: TransactionContext) {
+        ${code}
+      }
+    }
+  `, errors: [{ messageId: "sqlInjection" }]}
+}
+
 //////////
 
 const testSet: TestSet = [
+  ["sql injection", [], [
+    makeSqlInjectionTest("const x = 'SELECT * FROM users WHERE username = bob';"),
+  ]],
+
   ["global mutations", [],
 
     [makeExpectedDetFailureTest(

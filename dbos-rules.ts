@@ -37,7 +37,7 @@ let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 const deterministicDecorators = new Set(["Workflow"]);
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const errorMessages = makeErrorMessageSet();
-const checkSqlInjectionDecorators = new Set(["TransactionContext"])
+const checkSqlInjectionDecorators = new Set(["Transaction"]);
 
 ////////// This is the set of error messages that can be emitted
 
@@ -265,8 +265,11 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
   }
 }
 
-const checkSqlInjection: ErrorChecker = (_node, _fn, _isLocal) => {
-  return "sqlInjection";
+const hasSqlInjection: ErrorChecker = (_node, _fn, _isLocal) => {
+  // TODO: flesh this out more
+  if (Node.isStringLiteral(_node)) {
+    return "sqlInjection";
+  }
 }
 
 ////////// This is the main function that recurs on the `ts-morph` AST
@@ -334,7 +337,7 @@ function analyzeFunction(fn: FunctionOrMethod) {
       // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
     }
     else if (functionHasDecoratorInSet(fn, checkSqlInjectionDecorators)) {
-      runErrorChecker(checkSqlInjection, node);
+      runErrorChecker(hasSqlInjection, node);
     }
     else {
       // console.log("Not accounted for (nondet function)...");
