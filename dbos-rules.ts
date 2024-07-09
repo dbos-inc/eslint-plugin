@@ -4,7 +4,8 @@ import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } fr
 import {
   ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
-  MethodDeclaration, SyntaxKind
+  MethodDeclaration, SyntaxKind, Project, Expression,
+  VariableDeclaration, Identifier
 } from "ts-morph";
 
 // Should I find TypeScript variants of these?
@@ -27,8 +28,11 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 
+// This returns the initializer for a local variable if it exists
+type LocalGetter = (name: string) => Expression | undefined;
+
 // This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
-type ErrorChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | undefined;
+type ErrorChecker = (node: Node, fn: FunctionOrMethod, getLocal: LocalGetter) => string | undefined;
 
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
@@ -38,6 +42,7 @@ const deterministicDecorators = new Set(["Workflow"]);
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const errorMessages = makeErrorMessageSet();
 const checkSqlInjectionDecorators = new Set(["Transaction"]);
+const validOrmClientNames = new Set(["PoolClient", "PrismaClient", "TypeORMEntityManager", "Knex"]);
 
 ////////// This is the set of error messages that can be emitted
 
@@ -145,33 +150,45 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
   for its AST). */
 
-  // return tsMorphNode.getType().getSymbol()?.getName(); // TODO: why does this work again now?
-  return GLOBAL_TOOLS!.typeChecker.getTypeAtLocation(tsMorphNode.compilerNode).getSymbol()?.getName();
+  const typeChecker = GLOBAL_TOOLS!.typeChecker;
+
+  // The name from the symbol is more minimal, so preferring that here when it's available
+  const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
+  return type.getSymbol()?.getName() ?? typeChecker.typeToString(type);
 }
 
-////////// These functions are the determinism and SQL injection heuristics that I've written
+////////// These functions are the determinism heuristics that I've written
 
-const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
+// TODO: use this in more places
+function getIdentifierIfVariableModification(node: Node): Identifier | undefined {
   if (Node.isExpressionStatement(node)) {
     const subexpr = node.getExpression();
 
     if (Node.isBinaryExpression(subexpr)) {
       const lhs = reduceNodeToLeftmostLeaf(subexpr.getLeft());
 
-      if (Node.isIdentifier(lhs) && !isLocal(lhs.getText())) {
-        return "globalModification";
+      if (Node.isIdentifier(lhs)) {
+        return lhs;
       }
 
-      /* TODO: warn about these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
+      /* TODO: catch these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
       Could I solve that by checking for equals signs, and then a variable, or array with variables in it,
       on the lefthand side? */
     }
   }
 }
 
+const mutatesGlobalVariable: ErrorChecker = (node, _fn, getLocal) => {
+  const maybeIdentifier = getIdentifierIfVariableModification(node);
+
+  if (maybeIdentifier !== undefined && getLocal(maybeIdentifier.getText()) === undefined) {
+    return "globalModification";
+  }
+}
+
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
-const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
+const callsBannedFunction: ErrorChecker = (node, _fn, _getLocal) => {
   // All of these function names are also keys in `ERROR_MESSAGES` above
 
   const AS_MANY_ARGS_AS_YOU_WANT = 99999;
@@ -208,7 +225,7 @@ const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
   }
 }
 
-const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
+const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
 
   ////////// This is a little utility function used below
@@ -266,45 +283,79 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
   }
 }
 
-const isSqlInjection: ErrorChecker = (node, _fn, _isLocal) => {
-  // TODO: match these more robustly later
+////////// This code is for detecting SQL injections
+
+/*
+for `ctxt.client.raw(x)`,
+- `clientName` is the type of `client`
+- `callName` is `raw`
+- `sqlParamIndex` is the index of the SQL string to check
+- `identifiers` is `[ctxt, client, raw]`
+- `typeNames` is the types of the identifiers
+- `callArgs` is the arg nodes (here, just `x`)
+*/
+function checkCallForInjection(callName: string, sqlParamIndex: number,
+  identifiers: Node[], callArgs: Node[], getLocal: LocalGetter) {
+
+  // `ctxt.client.<callName>`
+  if (identifiers[2].getText() !== callName) {
+    return;
+  }
+
+  let param = callArgs[sqlParamIndex];
+
+  // In this case, trace it to its initializer (TODO: find other sets of the parameter)
+  if (Node.isIdentifier(param)) {
+    const localValue = getLocal(param.getText());
+
+    /* TODO: figure out how to trace every setting of the variable
+    (so trace through the function body for usages, and then check for a parent equals -
+    use that for the global var checking too).  Make a function called `variableIsBeingModified`,
+    and then use that for the global variable detector, and use it here too in an each-descendant case
+    (and then stop using `getLocal` here; so undo it).
+
+    Or, figure out how to use the reference-getting function (from creating a `Project` object). */
+    if (localValue === undefined) {
+      throw new Error("Do more elaborate tracing to find the definition!");
+    }
+
+    // TODO: use `getIdentifierIfVariableModification` over the function body (or figure out how to use the builtin helper function for this)
+
+    param = localValue;
+  }
+
+  if (!Node.isStringLiteral(param)) {
+    return "sqlInjection";
+  }
+}
+
+const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
   if (Node.isCallExpression(node)) {
     const subexpr = node.getExpression();
-
     const identifiers = subexpr.getDescendantsOfKind(SyntaxKind.Identifier);
 
-    if (identifiers.length === 0) {
+    // `ctxt.client.<something>`
+    if (identifiers.length !== 3) {
       return;
     }
 
-    // const text = identifiers.map((node) => node.getText());
-    const typeNames = identifiers.map(getTypeNameForTsMorphNode);
+    const callArgs = node.getArguments();
+    const identifierTypeNames = identifiers.map(getTypeNameForTsMorphNode);
 
-    // In this case, not a valid SQL query
-    if (typeNames[0] !== "TransactionContext") {
+    const maybeOrmClientName = identifierTypeNames[1];
+
+    // In this case, not a valid DBOS SQL query
+    if (identifierTypeNames[0] !== "TransactionContext" || maybeOrmClientName === undefined || !validOrmClientNames.has(maybeOrmClientName)) {
       return;
     }
 
-    // TODO: do I need bounds checking?
-    const maybeClientName = typeNames[1];
-
-    // TODO: now implement checking for the different function call variants
-    switch (maybeClientName) {
-      case "PoolClient":
-        throw new Error(`${maybeClientName} not implemented yet`);
-      case "PrismaClient":
-        throw new Error(`${maybeClientName} not implemented yet`);
-      case "TypeORMEntityManager":
-        throw new Error(`${maybeClientName} not implemented yet`);
-      case "Knex":
-        throw new Error(`${maybeClientName} not implemented yet`);
-      case undefined:
-        return;
-      default:
-        throw new Error("Unsupported client name: " + maybeClientName)
+    if (maybeOrmClientName === "Knex") {
+      const error = checkCallForInjection("raw", 0, identifiers, callArgs, getLocal);
+      if (error !== undefined) return error;
     }
-
-    return undefined;
+    else {
+      throw new Error(`${maybeOrmClientName} not implemented yet`);
+    }
   }
 }
 
@@ -327,16 +378,26 @@ function analyzeFunction(fn: FunctionOrMethod) {
   any exceptions to exit outside `analyzeFunction` would lead
   to the stack getting reset if `analyzeFunction` is called again). */
 
-  const stack: Set<string>[] = [new Set()];
+  // This maps locals to their initializers
+  const stack: Map<string, Expression | undefined>[] = [new Map()];
   const getCurrentFrame = () => stack[stack.length - 1];
-  const pushFrame = () => stack.push(new Set());
+  const pushFrame = () => stack.push(new Map());
   const popFrame = () => stack.pop();
-  const isLocal = (name: string) => stack.some((frame) => frame.has(name));
+
+  // TODO: do this more idiomatically
+  const getLocal = (name: string) => {
+    for (const frame of stack) {
+      const res = frame.get(name);
+      if (res !== undefined) return res;
+    }
+
+    return undefined;
+  }
 
   const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
-    const messageKey = errorChecker(node, fn, isLocal);
+    const messageKey = errorChecker(node, fn, getLocal);
 
     if (messageKey !== undefined) {
       const correspondingEslintNode = makeEslintNode!(node);
@@ -366,7 +427,7 @@ function analyzeFunction(fn: FunctionOrMethod) {
     }
     // Note: parameters are not considered to be locals here (modifying them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
-      locals.add(node.getName());
+      locals.set(node.getName(), node.getInitializer());
     }
     else if (functionHasDecoratorInSet(fn, deterministicDecorators)) {
       detCheckers.forEach((detChecker) => runErrorChecker(detChecker, node));

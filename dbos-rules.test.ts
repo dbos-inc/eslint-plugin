@@ -55,6 +55,30 @@ function makeExpectedDetCode(
   `;
 }
 
+function makeSqlInjectionCode(code: string): string {
+  return `
+    class UserDatabaseClient {}
+    class DBOSContext {}
+
+    class Knex {
+      raw(x: string) {
+
+      }
+    }
+
+    export interface TransactionContext<T extends UserDatabaseClient> extends DBOSContext {
+      readonly client: T;
+    }
+
+    class Foo {
+      @Transaction()
+      injectionTime(ctxt: TransactionContext<Knex>) {
+        ${code}
+      }
+    }
+  `;
+}
+
 function makeExpectedDetSuccessTest(code: string,
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
 
@@ -68,37 +92,34 @@ function makeExpectedDetFailureTest(code: string, expectedErrorIds: string[],
   return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
 }
 
-function makeSqlInjectionTest(code: string): FailureTest {
-  return {code: `
-    class UserDatabaseClient {}
-    class DBOSContext {}
+function makeExpectedSqlInjectionSuccessTest(code: string): SuccessTest {
+  return { code: makeSqlInjectionCode(code) };
+}
 
-    interface Knex {
-      raw: number;
-    }
-
-    export interface TransactionContext<T extends UserDatabaseClient> extends DBOSContext {
-      readonly client: T;
-    }
-
-    class Foo {
-      @Transaction()
-      injectionTime(ctxt: TransactionContext<Knex>) {
-        ${code}
-      }
-    }
-  `, errors: [{ messageId: "sqlInjection" }]}
+function makeExpectedSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
+  const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
+  return { code: makeSqlInjectionCode(code), errors: inObjectFormat };
 }
 
 //////////
 
 const testSet: TestSet = [
-  ["sql injection", [], [
-    makeSqlInjectionTest(`
-      const x = 'SELECT * FROM users WHERE username = bob';
-      ctxt.client.raw(x);
-    `),
-  ]],
+  ["sql injection",
+
+    [
+      makeExpectedSqlInjectionSuccessTest(`
+        const y: string = 'SELECT * FROM users WHERE username = bob';
+        ctxt.client.raw(y);
+      `),
+    ],
+
+    [
+      makeExpectedSqlInjectionFailureTest(`
+        // This is a possible injection, since it's adding two values together! It should be fully literal.
+        const y: string = 'SELECT * FROM users WHERE username = ' + 'bob';
+        ctxt.client.raw(y);
+      `, ["sqlInjection"]),
+    ]],
 
   ["global mutations", [],
 
