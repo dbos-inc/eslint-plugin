@@ -194,7 +194,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
   function validTypeExistsInFunctionCallParams(functionCall: CallExpression, validTypes: Set<string>): boolean {
     // I'd like to use `isDisjointFrom` here, but it doesn't seem to be available, for some reason
     const argTypes = functionCall.getArguments().map(getTypeNameForTsMorphNode);
-    return argTypes.some((argType) => argType !== undefined && validTypes.has(argType));
+    return argTypes.some((argType) => validTypes.has(argType));
   }
 
   //////////
@@ -220,8 +220,6 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
     happening when the Typescript compiler can't get type info out
     of the LHS (that happens in some very rare cases). */
     const typeName = getTypeNameForTsMorphNode(lhs);
-    if (typeName === undefined) return;
-
     const awaitingOnAllowedType = awaitableTypes.has(typeName);
 
     if (!awaitingOnAllowedType) {
@@ -295,7 +293,7 @@ const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
     const maybeOrmClientName = identifierTypeNames[1];
 
     // In this case, not a valid DBOS SQL query
-    if (identifierTypeNames[0] !== "TransactionContext" || maybeOrmClientName === undefined || !validOrmClientNames.has(maybeOrmClientName)) {
+    if (identifierTypeNames[0] !== "TransactionContext" || !validOrmClientNames.has(maybeOrmClientName)) {
       return;
     }
 
@@ -413,7 +411,7 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 }
 
 // If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
-function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
+function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
   /* We need to use the typechecker to check the type, instead of `expr.getType()`,
   since type information is lost when creating `ts-morph` nodes from TypeScript compiler
   nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
