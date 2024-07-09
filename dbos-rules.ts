@@ -443,7 +443,7 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      throw new Error(`Was expecting a statemented node! Got this kind instead: ${tsMorphNode.getKindName()}`);
+      throw new Error(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}`);
     }
   }
   finally {
