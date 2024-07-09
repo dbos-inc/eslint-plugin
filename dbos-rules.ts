@@ -104,11 +104,7 @@ How hard is it to add a linter rule to always warn the user of this config setti
 function reduceNodeToLeftmostLeaf(node: Node): Node {
  while (true) {
     let value = node.getFirstChild();
-
-    if (value === undefined) {
-      return node;
-    }
-
+    if (value === undefined) return node;
     node = value;
   }
 }
@@ -166,10 +162,7 @@ function getIdentifierIfVariableModification(node: Node): Identifier | undefined
 
     if (Node.isBinaryExpression(subexpr)) {
       const lhs = reduceNodeToLeftmostLeaf(subexpr.getLeft());
-
-      if (Node.isIdentifier(lhs)) {
-        return lhs;
-      }
+      if (Node.isIdentifier(lhs)) return lhs;
 
       /* TODO: catch these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
       Could I solve that by checking for equals signs, and then a variable, or array with variables in it,
@@ -241,20 +234,17 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
 
   if (Node.isAwaitExpression(node)) {
     const functionCall = node.getExpression();
-
-    if (!Node.isCallExpression(functionCall)) {
-      return; // Wouldn't make sense otherwise
-    }
+    if (!Node.isCallExpression(functionCall)) return; // Wouldn't make sense otherwise
 
     let lhs = reduceNodeToLeftmostLeaf(functionCall);
 
     if (!Node.isIdentifier(lhs) && !Node.isThisExpression(lhs)) { // `this` may have a type too
-      if (Node.isLiteralExpression(lhs)) {
-        return; // Doesn't make sense to await on literals (that will be reported by something else)
-      }
-      else { // Throwing an error here, since I want to catch what this could be, and maybe revise the code below
-        throw new Error(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
-      }
+
+      // Doesn't make sense to await on literals (that will be reported by something else)
+      if (Node.isLiteralExpression(lhs)) return;
+
+      // Throwing an error here, since I want to catch what this could be, and maybe revise the code below
+      else throw new Error(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
     }
 
     /* If the typename is undefined, there's no associated typename
@@ -263,10 +253,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
     happening when the Typescript compiler can't get type info out
     of the LHS (that happens in some very rare cases). */
     const typeName = getTypeNameForTsMorphNode(lhs);
-
-    if (typeName === undefined) {
-      return;
-    }
+    if (typeName === undefined) return;
 
     const awaitingOnAllowedType = awaitableTypes.has(typeName);
 
@@ -298,9 +285,7 @@ function checkCallForInjection(callName: string, sqlParamIndex: number,
   identifiers: Node[], callArgs: Node[], getLocal: LocalGetter) {
 
   // `ctxt.client.<callName>`
-  if (identifiers[2].getText() !== callName) {
-    return;
-  }
+  if (identifiers[2].getText() !== callName) return;
 
   let param = callArgs[sqlParamIndex];
 
@@ -334,10 +319,8 @@ const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
     const subexpr = node.getExpression();
     const identifiers = subexpr.getDescendantsOfKind(SyntaxKind.Identifier);
 
-    // `ctxt.client.<something>`
-    if (identifiers.length !== 3) {
-      return;
-    }
+    // An injection in DBOS must match `ctxt.client.<something>`
+    if (identifiers.length !== 3) return;
 
     const callArgs = node.getArguments();
     const identifierTypeNames = identifiers.map(getTypeNameForTsMorphNode);
@@ -364,10 +347,7 @@ const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
 // At the moment, this only performs analysis on expected-to-be-deterministic functions
 function analyzeFunction(fn: FunctionOrMethod) {
   const body = fn.getBody();
-
-  if (body === undefined) {
-    throw new Error("When would a function not have a body?");
-  }
+  if (body === undefined) throw new Error("When would a function not have a body?");
 
   /* Note that each stack is local to each function,
   so it's reset when a new function is entered
@@ -385,13 +365,11 @@ function analyzeFunction(fn: FunctionOrMethod) {
   const popFrame = () => stack.pop();
 
   // TODO: do this more idiomatically
-  const getLocal = (name: string) => {
+  const getLocal: LocalGetter = (name: string) => {
     for (const frame of stack) {
-      const res = frame.get(name);
-      if (res !== undefined) return res;
+      const initialValue = frame.get(name);
+      if (initialValue !== undefined) return initialValue;
     }
-
-    return undefined;
   }
 
   const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
