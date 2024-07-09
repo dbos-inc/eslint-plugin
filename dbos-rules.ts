@@ -4,8 +4,7 @@ import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } fr
 import {
   ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
-  MethodDeclaration, SyntaxKind, Project, Expression,
-  VariableDeclaration, Identifier
+  MethodDeclaration, SyntaxKind, Expression, Identifier
 } from "ts-morph";
 
 // Should I find TypeScript variants of these?
@@ -407,7 +406,9 @@ function makeTsMorphNode(eslintNode: EslintNode): Node {
 
 function makeEslintNode(tsMorphNode: Node): EslintNode {
   const compilerNode = tsMorphNode.compilerNode;
-  return GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
+  const eslintNode = GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
+  if (eslintNode === undefined) throw new Error("Couldn't find the corresponding ESLint node!");
+  return eslintNode;
 }
 
 // If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
