@@ -120,39 +120,6 @@ function functionHasDecoratorInSet(fnDecl: FunctionOrMethod, decoratorSet: Set<s
   );
 }
 
-// Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
-function makeTsMorphNode(eslintNode: EslintNode): Node {
-  const parserServices = GLOBAL_TOOLS!.parserServices;
-  const compilerNode = parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
-
-  const options = {
-    compilerOptions: parserServices.program.getCompilerOptions(),
-    sourceFile: compilerNode.getSourceFile(),
-    typeChecker: GLOBAL_TOOLS!.typeChecker
-  };
-
-  return createWrappedNode(compilerNode, options);
-}
-
-function makeEslintNode(tsMorphNode: Node): EslintNode {
-  const compilerNode = tsMorphNode.compilerNode;
-  return GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
-}
-
-// If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
-function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
-  /* We need to use the typechecker to check the type, instead of `expr.getType()`,
-  since type information is lost when creating `ts-morph` nodes from TypeScript compiler
-  nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
-  for its AST). */
-
-  const typeChecker = GLOBAL_TOOLS!.typeChecker;
-
-  // The name from the symbol is more minimal, so preferring that here when it's available
-  const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
-  return type.getSymbol()?.getName() ?? typeChecker.typeToString(type);
-}
-
 ////////// These functions are the determinism heuristics that I've written
 
 // TODO: use this in more places
@@ -424,7 +391,40 @@ function analyzeFunction(fn: FunctionOrMethod) {
   body.forEachChild(analyzeFrame);
 }
 
-////////// This is the entrypoint for running the determinism analysis with `ts-morph`
+////////// These are the functions that deal with node interop
+
+// Bijectivity is preseved for TSMorph <-> TSC <-> ESTree, as far as I can tell!
+function makeTsMorphNode(eslintNode: EslintNode): Node {
+  const parserServices = GLOBAL_TOOLS!.parserServices;
+  const compilerNode = parserServices.esTreeNodeToTSNodeMap.get(eslintNode);
+
+  const options = {
+    compilerOptions: parserServices.program.getCompilerOptions(),
+    sourceFile: compilerNode.getSourceFile(),
+    typeChecker: GLOBAL_TOOLS!.typeChecker
+  };
+
+  return createWrappedNode(compilerNode, options);
+}
+
+function makeEslintNode(tsMorphNode: Node): EslintNode {
+  const compilerNode = tsMorphNode.compilerNode;
+  return GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
+}
+
+// If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
+function getTypeNameForTsMorphNode(tsMorphNode: Node): string | undefined {
+  /* We need to use the typechecker to check the type, instead of `expr.getType()`,
+  since type information is lost when creating `ts-morph` nodes from TypeScript compiler
+  nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
+  for its AST). */
+
+  const typeChecker = GLOBAL_TOOLS!.typeChecker;
+
+  // The name from the symbol is more minimal, so preferring that here when it's available
+  const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
+  return type.getSymbol()?.getName() ?? typeChecker.typeToString(type);
+}
 
 function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   const parserServices = ESLintUtils.getParserServices(eslintContext, false);
