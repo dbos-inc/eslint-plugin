@@ -108,18 +108,83 @@ const testSet: TestSet = [
 
     [
       makeExpectedSqlInjectionSuccessTest(`
-        const y: string = 'SELECT * FROM users WHERE username = bob';
-        ctxt.client.raw(y);
-      `),
+        let foo = "xyz", bar = "xyw";
+        ctxt.client.raw(foo);
+        ctxt.client.raw(bar);
+      `)
     ],
 
     [
       makeExpectedSqlInjectionFailureTest(`
-        // This is a possible injection, since it's adding two values together! It should be fully literal.
-        const y: string = 'SELECT * FROM users WHERE username = ' + 'bob';
+        let foo = "xyz" + "zyw";
+        foo = "xyz" + "zyw";
+        ctxt.client.raw(foo); // Error
+        ctxt.client.raw(foo); // Error
+      `,
+        Array(2).fill("sqlInjection")
+      ),
+
+      makeExpectedSqlInjectionFailureTest(`
+        ctxt.client.raw("bob");
+        ctxt.client.raw("bob" + "ba"); // Error
+        ctxt.client.raw("bob" + "ba"); // Error
+        ctxt.client.raw("bob" + "ba"); // Error
+
+        let x = "foo";
+        ctxt.client.raw(x);
+
+        let z = "aha", y = "baha";
+
+        {
+          y = "fox";
+          y = "foy" + "fob"; // Would result in an error
+          y = "foz" + "fob"; // Would result in an error
+          y = "fox";
+          ctxt.client.raw(y); // Error
+          ctxt.client.raw(y); // Error
+        }
+        ctxt.client.raw(y); // Error
+      `,
+        Array(6).fill("sqlInjection")),
+
+
+      makeExpectedSqlInjectionFailureTest(`
+        let y = "abc";
+        y = "fox";
+        y = "foy" + "fob"; // Would result in an error
+        y = "foz" + "fob"; // Would result in an error
+        y = "fox";
+        ctxt.client.raw(y); // Error
+        ctxt.client.raw(y); // Error
+        ctxt.client.raw(y); // Error
+      `,
+        Array(3).fill("sqlInjection")
+      ),
+
+      makeExpectedSqlInjectionFailureTest(`
+        let x, y, z;
+
+        x = "fox" + "fob";
+        y = x;
+        z = y;
+
+        ctxt.client.raw(x); // Error
+        ctxt.client.raw(y); // Error
+        ctxt.client.raw(y); // Error
+        ctxt.client.raw(z); // Error (traces from z to y to x to "fox + fob")
+      `,
+        Array(4).fill("sqlInjection")
+      ),
+
+      makeExpectedSqlInjectionFailureTest(`
+        let x = "foo", y = "bar" + x;
+        ctxt.client.raw(x);
         ctxt.client.raw(y);
-      `, ["sqlInjection"]),
-    ]],
+      `,
+        Array(1).fill("sqlInjection")
+    )
+    ]
+  ],
 
   ["global mutations", [],
 
@@ -134,6 +199,9 @@ const testSet: TestSet = [
           x = 4; // Not allowed
           this.x = 4; // Allowed
           y.a += 1; // Not allowed
+
+          // TODO: make this get caught
+          // x = 23 + x, x = 24 + x;
 
           let y = {a: 3, b: 4}; // Aliases the global 'y'
           y.a = 1; // Not a global modification anymore

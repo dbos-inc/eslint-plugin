@@ -27,13 +27,11 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 
-// This returns the initializer for a local variable if it exists
-type LocalGetter = (name: string) => Expression | undefined;
-
-// This returns `undefined` if there is no error message to emit; otherwise, it returns a key to the `ERROR_MESSAGES` map
-type ErrorChecker = (node: Node, fn: FunctionOrMethod, getLocal: LocalGetter) => string | undefined;
+type ErrorMessageIdWithFormatData = [string, Record<string, unknown>]; // This returns `undefined` for no error; otherwise, it returns a key to the `ERROR_MESSAGES` map, or a key + info for error string formatting
+type ErrorChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
 
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
+
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 // These included `Transaction` and `TransactionContext` respectively before!
@@ -58,7 +56,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["sqlInjection", "Possible SQL injection detected! Use prepared statements instead"],
+    ["sqlInjection", "Possible SQL injection detected (The assignment on line {{ lineNumber }} involved string concatenation)! Use prepared statements instead"],
     ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -93,7 +91,7 @@ const ignoreAwaitsForCallsWithAContextParam = true;
 
 /*
 TODO (Harry's request):
-Peter asked me to add a config setting for @StoredProcedure methods to enable them to run locally.
+Peter asked me to add a config setting for `@StoredProcedure` methods to enable them to run locally.
 How hard is it to add a linter rule to always warn the user of this config setting is enabled?`
 */
 
@@ -121,7 +119,7 @@ function functionHasDecoratorInSet(fnDecl: FunctionOrMethod, decoratorSet: Set<s
 
 ////////// These functions are the determinism heuristics that I've written
 
-// TODO: use this in more places
+// TODO: use this in more places (if not, inline)
 function getIdentifierIfVariableModification(node: Node): Identifier | undefined {
   if (Node.isExpressionStatement(node)) {
     const subexpr = node.getExpression();
@@ -132,23 +130,25 @@ function getIdentifierIfVariableModification(node: Node): Identifier | undefined
 
       /* TODO: catch these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
       Could I solve that by checking for equals signs, and then a variable, or array with variables in it,
-      on the lefthand side? */
+      on the lefthand side?
+
+      Also make sure that e.g. `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` works. */
     }
   }
 }
 
-const mutatesGlobalVariable: ErrorChecker = (node, _fn, getLocal) => {
+const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
   const maybeIdentifier = getIdentifierIfVariableModification(node);
 
-  if (maybeIdentifier !== undefined && getLocal(maybeIdentifier.getText()) === undefined) {
+  if (maybeIdentifier !== undefined && !isLocal(maybeIdentifier.getText())) {
     return "globalModification";
   }
 }
 
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
-const callsBannedFunction: ErrorChecker = (node, _fn, _getLocal) => {
-  // All of these function names are also keys in `ERROR_MESSAGES` above
+const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
+  // All of these function names are also keys in `errorMesages` above
 
   const AS_MANY_ARGS_AS_YOU_WANT = 99999;
   type ArgCountRange = {min: number, max: number}; // This range is inclusive
@@ -184,7 +184,7 @@ const callsBannedFunction: ErrorChecker = (node, _fn, _getLocal) => {
   }
 }
 
-const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
+const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
 
   ////////// This is a little utility function used below
@@ -213,11 +213,6 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
       else throw new Error(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
     }
 
-    /* If the typename is undefined, there's no associated typename
-    (so possibly a variable is being used that was never defined;
-    that error will be handled elsewhere). TODO: figure out what's
-    happening when the Typescript compiler can't get type info out
-    of the LHS (that happens in some very rare cases). */
     const typeName = getTypeNameForTsMorphNode(lhs);
     const awaitingOnAllowedType = awaitableTypes.has(typeName);
 
@@ -236,51 +231,84 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _getLocal) => {
 
 ////////// This code is for detecting SQL injections
 
-/*
-for `ctxt.client.raw(x)`,
-- `clientName` is the type of `client`
-- `callName` is `raw`
-- `sqlParamIndex` is the index of the SQL string to check
-- `identifiers` is `[ctxt, client, raw]`
-- `typeNames` is the types of the identifiers
-- `callArgs` is the arg nodes (here, just `x`)
-*/
-function checkCallForInjection(callName: string, sqlParamIndex: number,
-  identifiers: Node[], callArgs: Node[], getLocal: LocalGetter) {
-
-  // `ctxt.client.<callName>`
-  if (identifiers[2].getText() !== callName) return;
-
-  let param = callArgs[sqlParamIndex];
-
-  // In this case, trace it to its initializer (TODO: find other sets of the parameter)
-  if (Node.isIdentifier(param)) {
-    const localValue = getLocal(param.getText());
-
-    /* TODO: figure out how to trace every setting of the variable
-    (so trace through the function body for usages, and then check for a parent equals -
-    use that for the global var checking too).  Make a function called `variableIsBeingModified`,
-    and then use that for the global variable detector, and use it here too in an each-descendant case
-    (and then stop using `getLocal` here; so undo it).
-
-    Or, figure out how to use the reference-getting function (from creating a `Project` object). */
-    if (localValue === undefined) {
-      throw new Error("Do more elaborate tracing to find the definition!");
+// TODO: check that this works when aliasing
+function* getReferencesToIdentifier(fn: FunctionOrMethod, identifier: Identifier): Generator<Node> {
+  for (const node of fn.getBody()!.getDescendants()) {
+    // Not the same node, also an identifier, and the same symbol
+    if (node !== identifier && Node.isIdentifier(node) && node.getSymbol() === identifier.getSymbol()) {
+      yield node;
     }
-
-    // TODO: use `getIdentifierIfVariableModification` over the function body (or figure out how to use the builtin helper function for this)
-
-    param = localValue;
-  }
-
-  if (!Node.isStringLiteral(param)) {
-    return "sqlInjection";
   }
 }
 
-const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
+/*
+for `ctxt.client.raw(x)`,
+- `callName` is `raw`
+- `identifiers` is `[ctxt, client, raw]`
+- `callParam` is `x`
+- `fn` is the function that contains the call `ctxt.client.raw(x)`
+*/
+function checkCallForInjection(callName: string, identifiers: Identifier[],
+  callParam: Node, fn: FunctionOrMethod): [string, Record<string, unknown>] | undefined {
+
+  const constructError = (node: Node): ErrorMessageIdWithFormatData =>
+    ["sqlInjection", {lineNumber: node.getSourceFile().getLineAndColumnAtPos(node.getStart()).line}];
+
+  const isAllowedRValueForSQL = Node.isStringLiteral;
+
+  /* TODO for this:
+  - Check for recursion (e.g. `x = y`, then `y = x`). If I can't solve that, then just limit my recursion depth.
+  - Allow for literal strings to be concatenated (so expand `isAllowedRValueForSQL to allow this, and identifiers that are literals when traced too)
+  - Do not allow format strings
+  - Use the same mutation detection logic here as in `getIdentifierIfVariableModification`
+  - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
+
+  Questions:
+  - Should I use the function `Node.isVariableDeclarationList` at all?
+  */
+
+  // In this case, trace it to its every assignment, and see if it's not ever set to a plain string literal
+  if (Node.isIdentifier(callParam)) {
+    for (const reference of getReferencesToIdentifier(fn, callParam)) {
+      let reducedParam: Node | undefined = undefined;
+
+      const parent = reference.getParent();
+      if (parent === undefined) throw new Error("When would the parent to a reference ever not be defined?");
+
+      if (Node.isVariableDeclaration(parent)) {
+        const initialValue = parent.getInitializer();
+        if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
+        reducedParam = initialValue;
+      }
+      else if (Node.isExpression(parent) && parent.getChildAtIndex(1).getText() === "=") {
+        reducedParam = parent.getChildAtIndex(2);
+      }
+      else {
+        // throw new Error(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
+        continue;
+      }
+
+      // If it was traced back to be an identifier, then recur again
+      if (Node.isIdentifier(reducedParam)) {
+        return checkCallForInjection(callName, identifiers, reducedParam, fn);
+      }
+
+      else if (!isAllowedRValueForSQL(reducedParam)) {
+        return constructError(reducedParam);
+      }
+    }
+  }
+
+  else if (!isAllowedRValueForSQL(callParam)) {
+    return constructError(callParam);
+  }
+}
+
+const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
   if (Node.isCallExpression(node)) {
     const subexpr = node.getExpression();
+
+    // `ctxt.client.<callName>`
     const identifiers = subexpr.getDescendantsOfKind(SyntaxKind.Identifier);
 
     // An injection in DBOS must match `ctxt.client.<something>`
@@ -296,9 +324,9 @@ const isSqlInjection: ErrorChecker = (node, _fn, getLocal) => {
       return;
     }
 
-    if (maybeOrmClientName === "Knex") {
-      const error = checkCallForInjection("raw", 0, identifiers, callArgs, getLocal);
-      if (error !== undefined) return error;
+    if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
+      const errors = checkCallForInjection("raw", identifiers, callArgs[0], fn);
+      if (errors !== undefined) return errors;
     }
     else {
       throw new Error(`${maybeOrmClientName} not implemented yet`);
@@ -327,23 +355,16 @@ function analyzeFunction(fn: FunctionOrMethod) {
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Map());
   const popFrame = () => stack.pop();
-
-  // TODO: do this more idiomatically
-  const getLocal: LocalGetter = (name: string) => {
-    for (const frame of stack) {
-      const initialValue = frame.get(name);
-      if (initialValue !== undefined) return initialValue;
-    }
-  }
+  const isLocal = (name: string) => stack.some((frame) => frame.has(name));
 
   const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
-    const messageKey = errorChecker(node, fn, getLocal);
+    const response = errorChecker(node, fn, isLocal);
 
-    if (messageKey !== undefined) {
-      const correspondingEslintNode = makeEslintNode!(node);
-      GLOBAL_TOOLS!.eslintContext.report({ node: correspondingEslintNode, messageId: messageKey });
+    if (response !== undefined) {
+      let [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
+      GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
     }
   }
 
