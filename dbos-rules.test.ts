@@ -119,136 +119,108 @@ const testSet: TestSet = [
   You can find more info on LR-strings in `dbos-rules.ts`. */
 
   ["sql injection",
-    /* TODO: streamline these success tests more (less
-    repetition, and more distinct meaning per every test,
-    and use more consts) */
-
     [
-      // Success test #1
+      // Success test #1 (concatenation mania)
       makeSqlInjectionSuccessTest(`
+        // Variables -> literals
         const foo = "xyz", bar = "xyw";
         ctxt.client.raw(foo);
         ctxt.client.raw(bar);
 
-        // Literal concatenation is allowed
+        // Variables -> variables -> ... -> literals
+
+        // Literal concatenation
         ctxt.client.raw("foo" + "bar" + "baz" + "bam");
 
-        // And concatenation with other reduced-to literals is allowed
-        ctxt.client.raw("foo" + "bar" + "baz" + "bam" + foo);
+        // Literal + variable concatenation
+        ctxt.client.raw("foo" + "bar" + foo + bar + "baz" + "bam" + foo);
+
+        // Variable + variable concatenation
+        ctxt.client.raw(foo + foo + bar + foo);
       `),
 
-      // Success test #2
+      // Success test #2 (deep variable tracing)
       makeSqlInjectionSuccessTest(`
-        let x, y, z;
+        let w, x, y, z, å = "ghi";
 
-        x = "fox" + "fob";
+        w = "abc" + "def" + å;
+        x = w;
         y = x;
         z = y;
 
         ctxt.client.raw(x);
         ctxt.client.raw(y);
-        ctxt.client.raw(y);
-        ctxt.client.raw(z); // This traces from z to y to x to "fox + fob"
+        ctxt.client.raw(z);
+        ctxt.client.raw(w); // This traces from w to z to y to x to "abc" + "def" + å;
       `),
 
-      // Success test #3
+      // Success test #3 (lots of variable reassignments, and repeated identical calls)
       makeSqlInjectionSuccessTest(`
         let y = "abc";
         y = "fox";
-        y = "foy" + "fob";
-        y = "foz" + "fob";
+        y = "foy" + "fow";
+        y = "foz" + "fow";
         y = "fox";
         ctxt.client.raw(y);
         ctxt.client.raw(y);
-        ctxt.client.raw(y);
       `),
 
-      // Success test #4
+      // Success test #4 (messing around with scoping a bit)
       makeSqlInjectionSuccessTest(`
-        ctxt.client.raw("bob");
-        ctxt.client.raw("bob" + "ba");
-        ctxt.client.raw("bob" + "ba");
-        ctxt.client.raw("bob" + "ba");
+        let y = "abc";
+        y = "foo";
 
-        const x = "foo";
-        ctxt.client.raw(x);
-
-        let z = "aha", y = "baha";
-
-        {
+        if (y === "foo") {
           y = "fox";
-          y = "foy" + "fob";
-          y = "foz" + "fob";
-          y = "fox";
+          y = "foy" + "foz";
           ctxt.client.raw(y);
           ctxt.client.raw(y);
         }
-        ctxt.client.raw(y);
+
+        {
+          const y = "abc";
+          ctxt.client.raw(y);
+        }
       `),
 
-      // Success test #5
+      // Success test #5 (testing some reference cycle stuff)
       makeSqlInjectionSuccessTest(`
-        let foo = "xyz" + "zyw";
+        let foo = "xyz" + "zyw" + foo; // The last concatenation is invalid, but we're just testing circular reference detection
         foo = "xyz" + "zyw";
         foo = foo + foo, bar = "def" + foo;
 
         ctxt.client.raw(foo);
         ctxt.client.raw(foo);
         ctxt.client.raw(bar);
-      `),
-
-      // Success test #6
-      makeSqlInjectionSuccessTest(`
-        let foo = foo + "xyz"; // Partially invalid code, but just testing circular reference detection
-        let bar = "xyz" + "zyw" + foo; // The same here
-
-        ctxt.client.raw(foo);
-        ctxt.client.raw(bar);
-
-        let baz = bar + num.toString();
-      `),
-
-      // Success test #7
-      makeSqlInjectionSuccessTest(`
-        let x = "foo", y = "bar" + x + x;
-        ctxt.client.raw(x);
-        ctxt.client.raw(y);
-      `),
-
-      // Success test #8
-      makeSqlInjectionSuccessTest(`
-        let x = "foo", y = "bar";
-
-        let z = x + y; // Concatenating two literals is allowed
-        ctxt.client.raw(z);
-
-        z = z + "foo";
-        ctxt.client.raw(z);
-      `),
-
-      // Success test #9
-      makeSqlInjectionSuccessTest(`
-        let foo = "xyz", bar = "zyw";
-        ctxt.client.raw(foo + foo + foo + bar + baz + "foo" + "bar");
-
-        let baz = foo + foo + foo + bar + baz + "foo" + "bar";
-        ctxt.client.raw(baz);
 
         let x = "foo";
         let y = "bar";
-        let x = y, y = x;
+        x = y, y = x;
         ctxt.client.raw(x + y);
       `),
+
+      // Success test #6 (testing dependent assignment in a variable declaration list, namely for `y`'s rvalue)
+      makeSqlInjectionSuccessTest(`
+        const x = "foo", y = "bar" + x + x;
+        ctxt.client.raw(x);
+        ctxt.client.raw(y);
+      `)
     ],
 
     [
       makeSqlInjectionFailureTest(`
 
-        let bam = foo + foo + foo + bar + baz + "foo" + "bar", num = 5;
+        const bam = foo + foo + foo + bar + baz + "foo" + "bar", num = 5;
         ctxt.client.raw(bam + num.toString()); // Concatenating a literal-reducible string with one that is not
 
-        let asVar = bam + num.toString();
+        const asVar = bam + num.toString();
         ctxt.client.raw(asVar);
+
+        {
+          ctxt.client.raw(asVar); // This emits an error
+          const asVar = "this one is literal";
+          ctxt.client.raw(asVar); // This does not (we now have a different local with the same name)
+        }
       `,
         Array(2).fill("sqlInjection")
       )
@@ -278,7 +250,7 @@ const testSet: TestSet = [
           x = 23 + x, y.a = 24 + x; // One local, one global (the right one is not allowed)
           y.a = 23 + x, x = 24 + x; // One global, one local (the left one is not allowed)
 
-          let y = {a: 3, b: 4}; // Aliases the global 'y'
+          let y = {a: 3, b: 4}; // Aliases the global y
           y.a = 1; // Not a global modification anymore
         }
 
