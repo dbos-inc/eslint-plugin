@@ -36,7 +36,7 @@ const tester = new RuleTester({
   defaultFilenames: { ts: "dbos-rules.test.ts", tsx: "this_file_doesnt_exist.tsx" }
 });
 
-////////// These functions build different types of test cases with some primitive code structure around them.
+////////// These functions build different types of test cases with some primitive code structure around them
 
 function makeDetCode(
   code: string,
@@ -79,6 +79,10 @@ function makeSqlInjectionCode(code: string): string {
   `;
 }
 
+function errorIdsToObjectFormat(errorIds: string[]): { messageId: string }[] {
+  return errorIds.map((id) => { return { messageId: id }; });
+}
+
 function makeDetSuccessTest(code: string,
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
 
@@ -88,8 +92,10 @@ function makeDetSuccessTest(code: string,
 function makeDetFailureTest(code: string, expectedErrorIds: string[],
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
 
-  const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
-  return { code: makeDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
+  return {
+      code: makeDetCode(code, codeAboveClass, enclosingFunctionParams),
+      errors: errorIdsToObjectFormat(expectedErrorIds)
+    };
 }
 
 function makeSqlInjectionSuccessTest(code: string): SuccessTest {
@@ -97,8 +103,10 @@ function makeSqlInjectionSuccessTest(code: string): SuccessTest {
 }
 
 function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
-  const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
-  return { code: makeSqlInjectionCode(code), errors: inObjectFormat };
+  return {
+      code: makeSqlInjectionCode(code),
+      errors: errorIdsToObjectFormat(expectedErrorIds)
+    };
 }
 
 //////////
