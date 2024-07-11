@@ -113,6 +113,11 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): 
 
 // TODO: for the sake of testing the tests' soundness, check diagnostic warnings for these
 const testSet: TestSet = [
+  /* Note: the tests for SQL injection do not
+  involve any actual SQL code; they just test
+  for any non-LR-strings being passed to a raw SQL query callsite.
+  You can find more info on LR-strings in `dbos-rules.ts`. */
+
   ["sql injection",
     /* TODO: streamline these success tests more (less
     repetition, and more distinct meaning per every test,

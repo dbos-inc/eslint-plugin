@@ -290,56 +290,59 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   /* TODO:
   - Do not allow format strings
   - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
+  - Try a function with a string parameter, and test out concatenation from there
 
-  Spec:
-  A reduced allowed value is either a literal string, or a variable that reduces down to a literal string. Acronym: RAV.
-  Here's the authority on what's allowed for SQL string parameters (from a supported callsite):
-    1. RAVs (this is implemented)
-    2. RAVs concatenated with other RAVs (TODO: implement)
-    3. Variables that reduce down to RAVs concatenated with other RAVs (TODO: implement)
+  A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
+  Here's what's allowed for SQL string parameters (from a supported callsite):
+    1. LR
+    2. LRs concatenated with other LRs
+    3. Variables that reduce down to LRs concatenated with other LRSs
+
+  A literal-reducible value is not flagged for SQL injection, since injection would typically
+  happen in a case where you take some other non-literal-string datatype, cast it to a string,
+  and then concatenate that with a SQL query string. As long as the final value passed to the
+  callsite is only built up from literal strings at its core, then the final string should be okay.
   */
 
   /* I could use just booleans here for the explored state
-  (`IsBeingComputed` is functionally the same as `IsRAV`),
+  (`IsBeingComputed` is functionally the same as `IsLR`),
   but this is easier to read and understand. TODO: use booleans though. */
-  enum ExploredState {
-    IsNotRAV,
+  enum NodeState {
+    IsNotLR,
     IsBeingComputed,
-    IsRAV
+    IsLR
   }
 
-  let exploredNodes: Map<Node, ExploredState> = new Map();
+  let exploredNodes: Map<Node, NodeState> = new Map();
 
-  // TODO: rename to `LR` (literal-reducible)
-
-  // TODO: probably inline this into `isRAV` somehow
-  function wrapperIsRAV(node: Node): boolean {
+  // TODO: probably inline this into `IsLR` somehow
+  function wrapperIsLR(node: Node): boolean {
     const maybeState = exploredNodes.get(node);
 
     if (maybeState !== undefined) {
       switch (maybeState) {
-        case ExploredState.IsNotRAV: return false;
+        case NodeState.IsNotLR: return false;
 
         // Marking the is-being-computed state (which are call graph cycles) as true
-        case ExploredState.IsBeingComputed: case ExploredState.IsRAV: return true;
+        case NodeState.IsBeingComputed: case NodeState.IsLR: return true;
       }
     }
     else {
       // Ending up in a cycle will yield a true state
-      exploredNodes.set(node, ExploredState.IsBeingComputed);
-      const wasRAV = isRAV(node);
-      exploredNodes.set(node, wasRAV ? ExploredState.IsRAV : ExploredState.IsNotRAV);
-      return wasRAV;
+      exploredNodes.set(node, NodeState.IsBeingComputed);
+      const wasLR = isLR(node);
+      exploredNodes.set(node, wasLR ? NodeState.IsLR: NodeState.IsNotLR);
+      return wasLR;
     }
   }
 
-  function isRAV(node: Node): boolean {
+  function isLR(node: Node): boolean {
     if (Node.isStringLiteral(node)) {
       return true;
     }
     else if (Node.isIdentifier(node)) {
       for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
-        if (!wrapperIsRAV(rvalueAssigned)) return false;
+        if (!wrapperIsLR(rvalueAssigned)) return false;
       }
 
       return true;
@@ -348,14 +351,14 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     works for the assumed `+` too! And, test parens around string groupings, and
     other binary operators too. */
     else if (Node.isBinaryExpression(node)) {
-      return wrapperIsRAV(node.getLeft()) && wrapperIsRAV(node.getRight());
+      return wrapperIsLR(node.getLeft()) && wrapperIsLR(node.getRight());
     }
     else {
       return false;
     }
   }
 
-  if (!wrapperIsRAV(callParam)) {
+  if (!wrapperIsLR(callParam)) {
     // TODO: report the node that failed the check (to get the right line number)
     const lineNumber = callParam.getSourceFile().getLineAndColumnAtPos(callParam.getStart()).line;
     return ["sqlInjection", {lineNumber: lineNumber}];
