@@ -22,15 +22,17 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
-////////// These are some shared types and values used throughout the code
+////////// These are some shared types
 
 // TODO: support `FunctionExpression` and `ArrowFunction` too
-type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
+type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration; // TODO: add `Decl` as a suffix, and also for its variable usages
+type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
-type ErrorMessageIdWithFormatData = [string, Record<string, unknown>]; // This returns `undefined` for no error; otherwise, it returns a key to the `ERROR_MESSAGES` map, or a key + info for error string formatting
+type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
+// This returns `undefined` for no error; otherwise, it returns a just key to the `errorMessages` map, or a key paired with info for error string formatting
 type ErrorChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
 
-type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
+////////// These are some shared values used throughout the code
 
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
@@ -58,6 +60,17 @@ const assignmentTokenKinds = new Set([
   SyntaxKind.AmpersandAmpersandEqualsToken,
   SyntaxKind.QuestionQuestionEqualsToken,
   SyntaxKind.CaretEqualsToken
+]);
+
+// All of these function names are also keys in `errorMesages` above. Also note that the ranges are inclusive.
+const bannedFunctionsWithArgCountRanges: Map<string, {min: number, max: number}> = new Map([
+  ["Date",           {min: 0, max: 0}],
+  ["Date.now",       {min: 0, max: 0}],
+  ["Math.random",    {min: 0, max: 0}],
+  ["console.log",    {min: 0, max: Number.MAX_SAFE_INTEGER}],
+  ["setTimeout",     {min: 1, max: Number.MAX_SAFE_INTEGER}],
+  ["bcrypt.hash",    {min: 3, max: 3}],
+  ["bcrypt.compare", {min: 3, max: 3}]
 ]);
 
 ////////// This is the set of error messages that can be emitted
@@ -174,26 +187,10 @@ const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
 const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
-  // All of these function names are also keys in `errorMesages` above
-
-  const AS_MANY_ARGS_AS_YOU_WANT = 99999;
-  type ArgCountRange = {min: number, max: number}; // This range is inclusive
-
-  const bannedFunctionsWithArgCountRanges: Map<string, ArgCountRange> = new Map([
-    ["Date",           {min: 0, max: 0}],
-    ["Date.now",       {min: 0, max: 0}],
-    ["Math.random",    {min: 0, max: 0}],
-    ["console.log",    {min: 0, max: AS_MANY_ARGS_AS_YOU_WANT}],
-    ["setTimeout",     {min: 1, max: AS_MANY_ARGS_AS_YOU_WANT}],
-    ["bcrypt.hash",    {min: 3, max: 3}],
-    ["bcrypt.compare", {min: 3, max: 3}]
-  ]);
-
-  //////////
-
   if (Node.isCallExpression(node) || Node.isNewExpression(node)) {
     /* Doing this to make syntax like `Math. random` be reduced to `Math.random`
-    (although this might not work for more complicated function call layouts) */
+    (although this might not work for more complicated function call layouts).
+    TODO: make this fully robust. */
     const expr = node.getExpression();
     const kids = expr.getChildren();
     const text = (kids.length === 0) ? expr.getText() : kids.map((node) => node.getText()).join("");
@@ -231,7 +228,6 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
     let lhs = reduceNodeToLeftmostLeaf(functionCall);
 
     if (!Node.isIdentifier(lhs) && !Node.isThisExpression(lhs)) { // `this` may have a type too
-
       // Doesn't make sense to await on literals (that will be reported by something else)
       if (Node.isLiteralExpression(lhs)) return;
 
@@ -403,7 +399,6 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-// At the moment, this only performs analysis on expected-to-be-deterministic functions
 function analyzeFunction(fn: FunctionOrMethod) {
   const body = fn.getBody();
   if (body === undefined) panic("When would a function not have a body?");
