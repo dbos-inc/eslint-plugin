@@ -304,34 +304,23 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
 
-  /* I could use just booleans here for the explored state
-  (`IsBeingComputed` is functionally the same as `IsLR`),
-  but this is easier to read and understand. TODO: use booleans though. */
-  enum NodeState {
-    IsNotLR,
-    IsBeingComputed,
-    IsLR
-  }
-
-  let exploredNodes: Map<Node, NodeState> = new Map();
+  /* If the node's value is undefined, it hasn't been explored yet.
+  If it's false, it's not LR. If it's true, it's LR, or currently being
+  computed (which can indicate the existance of a reference cycle). */
+  let nodeLRResults: Map<Node, boolean> = new Map();
 
   // TODO: probably inline this into `IsLR` somehow
   function wrapperIsLR(node: Node): boolean {
-    const maybeState = exploredNodes.get(node);
+    const maybeResult = nodeLRResults.get(node);
 
-    if (maybeState !== undefined) {
-      switch (maybeState) {
-        case NodeState.IsNotLR: return false;
-
-        // Marking the is-being-computed state (which are call graph cycles) as true
-        case NodeState.IsBeingComputed: case NodeState.IsLR: return true;
-      }
+    if (maybeResult !== undefined) {
+      return maybeResult;
     }
     else {
-      // Ending up in a cycle will yield a true state
-      exploredNodes.set(node, NodeState.IsBeingComputed);
+      // Ending up in a cycle (e.g. from `z = z + "foo";`) will mark the node as LR
+      nodeLRResults.set(node, true);
       const wasLR = isLR(node);
-      exploredNodes.set(node, wasLR ? NodeState.IsLR: NodeState.IsNotLR);
+      nodeLRResults.set(node, wasLR);
       return wasLR;
     }
   }
