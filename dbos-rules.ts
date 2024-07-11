@@ -75,7 +75,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["sqlInjection", "Possible SQL injection detected (The assignment on line {{ lineNumber }} involved string concatenation)! Use prepared statements instead"],
+    ["sqlInjection", "Possible SQL injection detected (The assignment on line {{ lineNumber }} involved nonliteral string concatenation)! Use prepared statements instead"],
     ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -115,6 +115,10 @@ How hard is it to add a linter rule to always warn the user of this config setti
 */
 
 ////////// These are some utility functions
+
+function panic(message: string): never {
+  throw new Error(message);
+}
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
 function reduceNodeToLeftmostLeaf(node: Node): Node {
@@ -232,7 +236,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
       if (Node.isLiteralExpression(lhs)) return;
 
       // Throwing an error here, since I want to catch what this could be, and maybe revise the code below
-      else throw new Error(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
+      else panic(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
     }
 
     const typeName = getTypeNameForTsMorphNode(lhs);
@@ -253,37 +257,43 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
 
 ////////// This code is for detecting SQL injections
 
-// TODO: check that this works when aliasing
-function* getReferencesToIdentifier(fn: FunctionOrMethod, identifier: Identifier): Generator<Node> {
-  for (const node of fn.getBody()!.getDescendants()) {
-    // Not the same node, also an identifier, and the same symbol
-    if (node !== identifier && Node.isIdentifier(node) && node.getSymbol() === identifier.getSymbol()) {
-      yield node;
+function* getRValuesAssignedToIdentifier(fn: FunctionOrMethod, identifier: Identifier): Generator<Node> {
+  // TODO: use `forEachDescendant` to avoid the allocation here
+  for (const otherUsage of fn.getBody()!.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    // Not the same node, and has the same symbol
+    const isTheSameUsedInAnotherPlace = (identifier !== otherUsage && identifier.getSymbol() === otherUsage.getSymbol());
+    if (!isTheSameUsedInAnotherPlace) continue;
+
+    const parent = otherUsage.getParent();
+    if (parent === undefined) panic("When would the parent to a reference ever not be defined?");
+
+    if (Node.isVariableDeclaration(parent)) {
+      const initialValue = parent.getInitializer();
+      if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
+      yield initialValue;
+    }
+    else {
+        const maybeLAndRValues = maybeGetLAndRValuesForAssignment(parent);
+
+        if (maybeLAndRValues !== undefined) {
+          yield maybeLAndRValues[1];
+        }
+        else {
+          // panic(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
+          continue;
+        }
     }
   }
 }
 
-/*
-for `ctxt.client.raw(x)`,
-- `callName` is `raw`
-- `identifiers` is `[ctxt, client, raw]`
-- `callParam` is `x`
-- `fn` is the function that contains the call `ctxt.client.raw(x)`
-*/
-function checkCallForInjection(callName: string, identifiers: Identifier[],
-  callParam: Node, fn: FunctionOrMethod): [string, Record<string, unknown>] | undefined {
-
-  const constructError = (node: Node): ErrorMessageIdWithFormatData =>
-    ["sqlInjection", {lineNumber: node.getSourceFile().getLineAndColumnAtPos(node.getStart()).line}];
-
-  const isAllowedRValueForSQL = Node.isStringLiteral;
-
+function checkCallForInjection(callParam: Node, fn: FunctionOrMethod): ErrorMessageIdWithFormatData | undefined {
   /* TODO for this:
   - Check for recursion (e.g. `x = y`, then `y = x`). If I can't solve that, then just limit my recursion depth.
   - Allow for literal strings to be concatenated (so expand `isAllowedRValueForSQL to allow this, and identifiers that are literals when traced too)
   - Do not allow format strings
   - Use the same mutation detection logic here as in `getIdentifierIfVariableModification`
   - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
+  - Clean up this TODO list
 
   Questions:
   - Should I use the function `Node.isVariableDeclarationList` at all?
@@ -295,48 +305,68 @@ function checkCallForInjection(callName: string, identifiers: Identifier[],
     3. Variables that reduce down to RAVs concatenated with other RAVs (TODO: implement)
   */
 
-  // In this case, trace it to its every assignment, and see if it's not ever set to a plain string literal
-  if (Node.isIdentifier(callParam)) {
-    for (const reference of getReferencesToIdentifier(fn, callParam)) {
+  // TODO: perhaps also check if other stuff is added to the string that I'm checking (with the `+=` operator)
 
-      ////////// First step, try getting a reduced parameter by checking the RHS of the parent
+  /* I could use just booleans here for the explored state
+  (`IsBeingComputed` is functionally the same as `IsRAV`),
+  but this is easier to read and understand. TODO: use booleans though. */
+  enum ExploredState {
+    IsNotRAV,
+    IsBeingComputed,
+    IsRAV
+  }
 
-      let reducedParam: Node | undefined = undefined;
+  let exploredNodes: Map<Node, ExploredState> = new Map();
 
-      const parent = reference.getParent();
-      if (parent === undefined) throw new Error("When would the parent to a reference ever not be defined?");
+  // TODO: rename to `LR` (literal-reducible)
 
-      if (Node.isVariableDeclaration(parent)) {
-        const initialValue = parent.getInitializer();
-        if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
-        reducedParam = initialValue;
-      }
-      else {
-        const result = maybeGetLAndRValuesForAssignment(parent);
+  // TODO: probably inline this into `isRAV` somehow
+  function wrapperIsRAV(node: Node): boolean {
+    const maybeState = exploredNodes.get(node);
 
-        if (result !== undefined) {
-          reducedParam = result[1];
-        }
-        else {
-          // throw new Error(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
-          continue;
-        }
-      }
+    if (maybeState !== undefined) {
+      switch (maybeState) {
+        case ExploredState.IsNotRAV: return false;
 
-      ////////// Check the reduced parameter that we got
-
-      // If it was traced back to be an identifier, then recur again
-      if (Node.isIdentifier(reducedParam)) {
-        return checkCallForInjection(callName, identifiers, reducedParam, fn);
-      }
-      // If it's not an identifier, check that it's a valid rvalue
-      else if (!isAllowedRValueForSQL(reducedParam)) {
-        return constructError(reducedParam);
+        // Marking the is-being-computed state (which are call graph cycles) as true
+        case ExploredState.IsBeingComputed: case ExploredState.IsRAV: return true;
       }
     }
+    else {
+      // Ending up in a cycle will yield a true state
+      exploredNodes.set(node, ExploredState.IsBeingComputed);
+      const wasRAV = isRAV(node);
+      exploredNodes.set(node, wasRAV ? ExploredState.IsRAV : ExploredState.IsNotRAV);
+      return wasRAV;
+    }
   }
-  else if (!isAllowedRValueForSQL(callParam)) {
-    return constructError(callParam);
+
+  function isRAV(node: Node): boolean {
+    if (Node.isStringLiteral(node)) {
+      return true;
+    }
+    else if (Node.isIdentifier(node)) {
+      for (const rvalueAssigned of getRValuesAssignedToIdentifier(fn, node)) {
+        if (!wrapperIsRAV(rvalueAssigned)) return false;
+      }
+
+      return true;
+    }
+    /* TODO: this wouldn't work with the `+=` operator - and make sure that this
+    works for the assumed `+` too! And, test parens around string groupings, and
+    other binary operators too. */
+    else if (Node.isBinaryExpression(node)) {
+      return wrapperIsRAV(node.getLeft()) && wrapperIsRAV(node.getRight());
+    }
+    else {
+      return false;
+    }
+  }
+
+  if (!wrapperIsRAV(callParam)) {
+    // TODO: report the node that failed the check (to get the right line number)
+    const lineNumber = callParam.getSourceFile().getLineAndColumnAtPos(callParam.getStart()).line;
+    return ["sqlInjection", {lineNumber: lineNumber}];
   }
 }
 
@@ -362,11 +392,11 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
 
     if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
       // TODO: just return this directly
-      const errors = checkCallForInjection("raw", identifiers, callArgs[0], fn);
+      const errors = checkCallForInjection(callArgs[0], fn);
       if (errors !== undefined) return errors;
     }
     else {
-      throw new Error(`${maybeOrmClientName} not implemented yet`);
+      panic(`${maybeOrmClientName} not implemented yet`);
     }
   }
 }
@@ -376,7 +406,7 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
 // At the moment, this only performs analysis on expected-to-be-deterministic functions
 function analyzeFunction(fn: FunctionOrMethod) {
   const body = fn.getBody();
-  if (body === undefined) throw new Error("When would a function not have a body?");
+  if (body === undefined) panic("When would a function not have a body?");
 
   /* Note that each stack is local to each function,
   so it's reset when a new function is entered
@@ -464,7 +494,7 @@ function makeTsMorphNode(eslintNode: EslintNode): Node {
 function makeEslintNode(tsMorphNode: Node): EslintNode {
   const compilerNode = tsMorphNode.compilerNode;
   const eslintNode = GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
-  if (eslintNode === undefined) throw new Error("Couldn't find the corresponding ESLint node!");
+  if (eslintNode === undefined) panic("Couldn't find the corresponding ESLint node!");
   return eslintNode;
 }
 
@@ -499,7 +529,7 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      throw new Error(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}`);
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}`);
     }
   }
   finally {

@@ -103,90 +103,142 @@ function makeExpectedSqlInjectionFailureTest(code: string, expectedErrorIds: str
 
 //////////
 
+// TODO: for the sake of testing the tests' soundness, check diagnostic warnings for these
 const testSet: TestSet = [
   ["sql injection",
+    /* TODO: streamline these success tests more (less
+    repetition, and more distinct meaning per every test),
+    and use more consts */
 
     [
+      // Success test #1
       makeExpectedSqlInjectionSuccessTest(`
-        let foo = "xyz", bar = "xyw";
+        const foo = "xyz", bar = "xyw";
         ctxt.client.raw(foo);
         ctxt.client.raw(bar);
-      `)
-    ],
 
-    [
-      makeExpectedSqlInjectionFailureTest(`
-        let foo = "xyz" + "zyw";
-        foo = "xyz" + "zyw";
+        // Literal concatenation is allowed
+        ctxt.client.raw("foo" + "bar" + "baz" + "bam");
 
-        foo = foo + foo, bar = "def" + foo;
+        // And concatenation with other reduced-to literals is allowed
+        ctxt.client.raw("foo" + "bar" + "baz" + "bam" + foo);
+      `),
 
-        ctxt.client.raw(foo); // Error
-        ctxt.client.raw(foo); // Error
-        ctxt.client.raw(bar); // Error
-      `,
-        Array(3).fill("sqlInjection")
-      ),
-
-      makeExpectedSqlInjectionFailureTest(`
-        ctxt.client.raw("bob");
-        ctxt.client.raw("bob" + "ba"); // Error
-        ctxt.client.raw("bob" + "ba"); // Error
-        ctxt.client.raw("bob" + "ba"); // Error
-
-        let x = "foo";
-        ctxt.client.raw(x);
-
-        let z = "aha", y = "baha";
-
-        {
-          y = "fox";
-          y = "foy" + "fob"; // Would result in an error
-          y = "foz" + "fob"; // Would result in an error
-          y = "fox";
-          ctxt.client.raw(y); // Error
-          ctxt.client.raw(y); // Error
-        }
-        ctxt.client.raw(y); // Error
-      `,
-        Array(6).fill("sqlInjection")),
-
-
-      makeExpectedSqlInjectionFailureTest(`
-        let y = "abc";
-        y = "fox";
-        y = "foy" + "fob"; // Would result in an error
-        y = "foz" + "fob"; // Would result in an error
-        y = "fox";
-        ctxt.client.raw(y); // Error
-        ctxt.client.raw(y); // Error
-        ctxt.client.raw(y); // Error
-      `,
-        Array(3).fill("sqlInjection")
-      ),
-
-      makeExpectedSqlInjectionFailureTest(`
+      // Success test #2
+      makeExpectedSqlInjectionSuccessTest(`
         let x, y, z;
 
         x = "fox" + "fob";
         y = x;
         z = y;
 
-        ctxt.client.raw(x); // Error
-        ctxt.client.raw(y); // Error
-        ctxt.client.raw(y); // Error
-        ctxt.client.raw(z); // Error (traces from z to y to x to "fox + fob")
-      `,
-        Array(4).fill("sqlInjection")
-      ),
-
-      makeExpectedSqlInjectionFailureTest(`
-        let x = "foo", y = "bar" + x;
         ctxt.client.raw(x);
         ctxt.client.raw(y);
+        ctxt.client.raw(y);
+        ctxt.client.raw(z); // This traces from z to y to x to "fox + fob"
+      `),
+
+      // Success test #3
+      makeExpectedSqlInjectionSuccessTest(`
+        let y = "abc";
+        y = "fox";
+        y = "foy" + "fob";
+        y = "foz" + "fob";
+        y = "fox";
+        ctxt.client.raw(y);
+        ctxt.client.raw(y);
+        ctxt.client.raw(y);
+      `),
+
+      // Success test #4
+      makeExpectedSqlInjectionSuccessTest(`
+        ctxt.client.raw("bob");
+        ctxt.client.raw("bob" + "ba");
+        ctxt.client.raw("bob" + "ba");
+        ctxt.client.raw("bob" + "ba");
+
+        const x = "foo";
+        ctxt.client.raw(x);
+
+        let z = "aha", y = "baha";
+
+        {
+          y = "fox";
+          y = "foy" + "fob";
+          y = "foz" + "fob";
+          y = "fox";
+          ctxt.client.raw(y);
+          ctxt.client.raw(y);
+        }
+        ctxt.client.raw(y);
+      `),
+
+      // Success test #5
+      makeExpectedSqlInjectionSuccessTest(`
+        let foo = "xyz" + "zyw";
+        foo = "xyz" + "zyw";
+        foo = foo + foo, bar = "def" + foo;
+
+        ctxt.client.raw(foo);
+        ctxt.client.raw(foo);
+        ctxt.client.raw(bar);
+      `),
+
+      // Success test #6
+      makeExpectedSqlInjectionSuccessTest(`
+        let foo = foo + "xyz"; // Partially invalid code, but just testing circular reference detection
+        let bar = "xyz" + "zyw" + foo; // The same here
+
+        ctxt.client.raw(foo);
+        ctxt.client.raw(bar);
+
+        let baz = bar + num.toString();
+      `),
+
+      // Success test #7
+      makeExpectedSqlInjectionSuccessTest(`
+        let x = "foo", y = "bar" + x + x;
+        ctxt.client.raw(x);
+        ctxt.client.raw(y);
+      `),
+
+      // Success test #8
+      makeExpectedSqlInjectionSuccessTest(`
+        let x = "foo", y = "bar";
+
+        let z = x + y; // Concatenating two literals is allowed
+        ctxt.client.raw(z);
+
+        z = z + "foo";
+        ctxt.client.raw(z);
+      `),
+
+      // Success test #9
+      makeExpectedSqlInjectionSuccessTest(`
+        let foo = "xyz", bar = "zyw";
+        ctxt.client.raw(foo + foo + foo + bar + baz + "foo" + "bar");
+
+        let baz = foo + foo + foo + bar + baz + "foo" + "bar";
+        ctxt.client.raw(baz);
+
+        let x = "foo";
+        let y = "bar";
+        let x = y, y = x;
+        ctxt.client.raw(x + y);
+      `),
+    ],
+
+    [
+      makeExpectedSqlInjectionFailureTest(`
+
+        let bam = foo + foo + foo + bar + baz + "foo" + "bar", num = 5;
+        ctxt.client.raw(bam + num.toString()); // Concatenating a literal-reducible string with one that is not
+
+        let asVar = bam + num.toString();
+        ctxt.client.raw(asVar);
       `,
-        Array(1).fill("sqlInjection")
-    )
+        Array(2).fill("sqlInjection")
+      )
     ]
   ],
 
