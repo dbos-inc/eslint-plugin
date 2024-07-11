@@ -38,7 +38,7 @@ const tester = new RuleTester({
 
 ////////// These functions build different types of test cases with some primitive code structure around them.
 
-function makeExpectedDetCode(
+function makeDetCode(
   code: string,
   codeAboveClass: string,
   enclosingFunctionParams: string): string {
@@ -79,24 +79,24 @@ function makeSqlInjectionCode(code: string): string {
   `;
 }
 
-function makeExpectedDetSuccessTest(code: string,
+function makeDetSuccessTest(code: string,
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
 
-  return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams) };
+  return { code: makeDetCode(code, codeAboveClass, enclosingFunctionParams) };
 }
 
-function makeExpectedDetFailureTest(code: string, expectedErrorIds: string[],
+function makeDetFailureTest(code: string, expectedErrorIds: string[],
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
 
   const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
-  return { code: makeExpectedDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
+  return { code: makeDetCode(code, codeAboveClass, enclosingFunctionParams), errors: inObjectFormat };
 }
 
-function makeExpectedSqlInjectionSuccessTest(code: string): SuccessTest {
+function makeSqlInjectionSuccessTest(code: string): SuccessTest {
   return { code: makeSqlInjectionCode(code) };
 }
 
-function makeExpectedSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
+function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
   const inObjectFormat = expectedErrorIds.map((id) => { return { messageId: id }; });
   return { code: makeSqlInjectionCode(code), errors: inObjectFormat };
 }
@@ -107,12 +107,12 @@ function makeExpectedSqlInjectionFailureTest(code: string, expectedErrorIds: str
 const testSet: TestSet = [
   ["sql injection",
     /* TODO: streamline these success tests more (less
-    repetition, and more distinct meaning per every test),
-    and use more consts */
+    repetition, and more distinct meaning per every test,
+    and use more consts) */
 
     [
       // Success test #1
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         const foo = "xyz", bar = "xyw";
         ctxt.client.raw(foo);
         ctxt.client.raw(bar);
@@ -125,7 +125,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #2
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let x, y, z;
 
         x = "fox" + "fob";
@@ -139,7 +139,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #3
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let y = "abc";
         y = "fox";
         y = "foy" + "fob";
@@ -151,7 +151,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #4
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         ctxt.client.raw("bob");
         ctxt.client.raw("bob" + "ba");
         ctxt.client.raw("bob" + "ba");
@@ -174,7 +174,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #5
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let foo = "xyz" + "zyw";
         foo = "xyz" + "zyw";
         foo = foo + foo, bar = "def" + foo;
@@ -185,7 +185,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #6
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let foo = foo + "xyz"; // Partially invalid code, but just testing circular reference detection
         let bar = "xyz" + "zyw" + foo; // The same here
 
@@ -196,14 +196,14 @@ const testSet: TestSet = [
       `),
 
       // Success test #7
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let x = "foo", y = "bar" + x + x;
         ctxt.client.raw(x);
         ctxt.client.raw(y);
       `),
 
       // Success test #8
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let x = "foo", y = "bar";
 
         let z = x + y; // Concatenating two literals is allowed
@@ -214,7 +214,7 @@ const testSet: TestSet = [
       `),
 
       // Success test #9
-      makeExpectedSqlInjectionSuccessTest(`
+      makeSqlInjectionSuccessTest(`
         let foo = "xyz", bar = "zyw";
         ctxt.client.raw(foo + foo + foo + bar + baz + "foo" + "bar");
 
@@ -229,7 +229,7 @@ const testSet: TestSet = [
     ],
 
     [
-      makeExpectedSqlInjectionFailureTest(`
+      makeSqlInjectionFailureTest(`
 
         let bam = foo + foo + foo + bar + baz + "foo" + "bar", num = 5;
         ctxt.client.raw(bam + num.toString()); // Concatenating a literal-reducible string with one that is not
@@ -244,7 +244,7 @@ const testSet: TestSet = [
 
   ["global mutations", [],
 
-    [makeExpectedDetFailureTest(
+    [makeDetFailureTest(
       `
       let x = 3;
       let y = {a: 1, b: 2};
@@ -298,50 +298,50 @@ const testSet: TestSet = [
 
   ["banned/not banned functions",
     [
-      makeExpectedDetSuccessTest("foo();"), // Calling these `Date` variants is allowed
-      makeExpectedDetSuccessTest("Date('December 17, 1995 03:24:00');"),
-      makeExpectedDetSuccessTest("new Date('December 17, 1995 03:24:00');")
+      makeDetSuccessTest("foo();"), // Calling these `Date` variants is allowed
+      makeDetSuccessTest("Date('December 17, 1995 03:24:00');"),
+      makeDetSuccessTest("new Date('December 17, 1995 03:24:00');")
     ],
 
     [
       /* The secondary args here are the expected error
       IDs (which line up with the banned functions tested) */
-      makeExpectedDetFailureTest("Date();", ["Date"]),
-      makeExpectedDetFailureTest("new Date();", ["Date"]),
-      makeExpectedDetFailureTest("Math.random();", ["Math.random"]),
-      makeExpectedDetFailureTest("console.log(\"Hello!\");", ["console.log"]),
-      makeExpectedDetFailureTest("setTimeout(a, b);", ["setTimeout"]),
-      makeExpectedDetFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
-      makeExpectedDetFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
+      makeDetFailureTest("Date();", ["Date"]),
+      makeDetFailureTest("new Date();", ["Date"]),
+      makeDetFailureTest("Math.random();", ["Math.random"]),
+      makeDetFailureTest("console.log(\"Hello!\");", ["console.log"]),
+      makeDetFailureTest("setTimeout(a, b);", ["setTimeout"]),
+      makeDetFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
+      makeDetFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
     ]
   ],
 
   ["allowed/not allowed awaits",
     [
 
-      makeExpectedDetSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
-      makeExpectedDetSuccessTest("await new Set();"), // TODO: definitely make this not allowed
+      makeDetSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
+      makeDetSuccessTest("await new Set();"), // TODO: definitely make this not allowed
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #1
-      makeExpectedDetSuccessTest(
+      makeDetSuccessTest(
         "await ctxt.foo();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
-      makeExpectedDetSuccessTest(
+      makeDetSuccessTest(
         "await ctxt.invoke(ShopUtilities).retrieveOrder(order_id);",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #3
-      makeExpectedDetSuccessTest(
+      makeDetSuccessTest(
         "await ctxt.client<User>('users').select('password').where({ username }).first();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a leftmost non-`WorkflowContext` type, but you pass a `WorkflowContext` in
-      makeExpectedDetSuccessTest(
+      makeDetSuccessTest(
         `
         async function workflowHelperFunction(ctxt: WorkflowContext) {
           return await ctxt.baz();
@@ -355,10 +355,10 @@ const testSet: TestSet = [
 
     [
       // Awaiting on a not-allowed function, #1
-      makeExpectedDetFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
+      makeDetFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
 
       // Awaiting on a not-allowed function, #2
-      makeExpectedDetFailureTest(`
+      makeDetFailureTest(`
         async function foo() {
           return 5;
         }
@@ -369,27 +369,27 @@ const testSet: TestSet = [
       ),
 
       // Awaiting on a not-allowed class, #1
-      makeExpectedDetFailureTest(
+      makeDetFailureTest(
         "const x = new Set(); await x.foo();",
         ["awaitingOnNotAllowedType"]
       ),
 
       // Awaiting on a not-allowed class, #2
-      makeExpectedDetFailureTest(
+      makeDetFailureTest(
         "await fooBar.foo();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #3
-      makeExpectedDetFailureTest(
+      makeDetFailureTest(
         "await fooBar.invoke(ShopUtilities).retrieveOrder(order_id);",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #4
-      makeExpectedDetFailureTest(
+      makeDetFailureTest(
         "await fooBar.client<User>('users').select('password').where({ username }).first();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
