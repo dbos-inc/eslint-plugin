@@ -37,11 +37,8 @@ type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (name: string) => bool
 
 let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
-// These included `Transaction` and `TransactionContext` respectively before!
-const deterministicDecorators = new Set(["Workflow"]);
-const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const errorMessages = makeErrorMessageSet();
-const checkSqlInjectionDecorators = new Set(["Transaction"]);
+const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 const validOrmClientNames = new Set(["PoolClient", "PrismaClient", "TypeORMEntityManager", "Knex"]);
 
 const assignmentTokenKinds = new Set([
@@ -303,8 +300,8 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
   /* TODO:
   - Do not allow format strings
-  - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
   - Try a function with a string parameter, and test out concatenation from there
+  - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
 
   A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
   Here's what's allowed for SQL string parameters (from a supported callsite):
@@ -338,9 +335,6 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
 
       return true;
     }
-    /* TODO: this wouldn't work with the `+=` operator - and make sure that this
-    works for the assumed `+` too! And, test parens around string groupings, and
-    other binary operators too. */
     else if (Node.isBinaryExpression(node)) {
       return isLR(node.getLeft()) && isLR(node.getRight());
     }
@@ -405,6 +399,12 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
+// Note: a workflow can never be a transaction, so no need to worry about overlap here
+const decoratorSetErrorCheckerMapping: Map<Set<string>, ErrorChecker[]> = new Map([
+  [new Set(["Transaction"]), [isSqlInjection]],
+  [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]]
+]);
+
 function analyzeFunction(fnDecl: FnDecl) {
   const body = fnDecl.getBody(); // TODO: use the or-throw variant here
   if (body === undefined) panic("When would a function not have a body?");
@@ -423,8 +423,6 @@ function analyzeFunction(fnDecl: FnDecl) {
   const pushFrame = () => stack.push(new Set());
   const popFrame = () => stack.pop();
   const isLocal = (name: string) => stack.some((frame) => frame.has(name));
-
-  const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
     const response = errorChecker(node, fnDecl, isLocal);
@@ -459,15 +457,13 @@ function analyzeFunction(fnDecl: FnDecl) {
     else if (Node.isVariableDeclaration(node)) {
       locals.add(node.getName());
     }
-    else if (functionHasDecoratorInSet(fnDecl, deterministicDecorators)) {
-      detCheckers.forEach((detChecker) => runErrorChecker(detChecker, node));
-      // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
-    }
-    else if (functionHasDecoratorInSet(fnDecl, checkSqlInjectionDecorators)) {
-      runErrorChecker(isSqlInjection, node);
-    }
     else {
-      // console.log("Not accounted for (nondet function)...");
+      for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
+        if (functionHasDecoratorInSet(fnDecl, decoratorSet)) {
+          errorCheckers.forEach((errorChecker) => runErrorChecker(errorChecker, node));
+          break; // This assumes that applying one decorator means that you can't apply another on top of it
+        }
+      }
     }
 
     node.forEachChild(analyzeFrame);
