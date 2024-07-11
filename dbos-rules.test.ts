@@ -38,7 +38,7 @@ const tester = new RuleTester({
 
 ////////// These functions build different types of test cases with some primitive code structure around them
 
-function makeDetCode(
+function makeDeterminismCode(
   code: string,
   codeAboveClass: string,
   enclosingFunctionParams: string): string {
@@ -83,17 +83,17 @@ function errorIdsToObjectFormat(errorIds: string[]): { messageId: string }[] {
   return errorIds.map((id) => { return { messageId: id }; });
 }
 
-function makeDetSuccessTest(code: string,
+function makeDeterminismSuccessTest(code: string,
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
 
-  return { code: makeDetCode(code, codeAboveClass, enclosingFunctionParams) };
+  return { code: makeDeterminismCode(code, codeAboveClass, enclosingFunctionParams) };
 }
 
-function makeDetFailureTest(code: string, expectedErrorIds: string[],
+function makeDeterminismFailureTest(code: string, expectedErrorIds: string[],
   { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
 
   return {
-      code: makeDetCode(code, codeAboveClass, enclosingFunctionParams),
+      code: makeDeterminismCode(code, codeAboveClass, enclosingFunctionParams),
       errors: errorIdsToObjectFormat(expectedErrorIds)
     };
 }
@@ -252,7 +252,7 @@ const testSet: TestSet = [
 
   ["global mutations", [],
 
-    [makeDetFailureTest(
+    [makeDeterminismFailureTest(
       `
       let x = 3;
       let y = {a: 1, b: 2};
@@ -306,50 +306,50 @@ const testSet: TestSet = [
 
   ["banned/not banned functions",
     [
-      makeDetSuccessTest("foo();"), // Calling these `Date` variants is allowed
-      makeDetSuccessTest("Date('December 17, 1995 03:24:00');"),
-      makeDetSuccessTest("new Date('December 17, 1995 03:24:00');")
+      makeDeterminismSuccessTest("foo();"), // Calling these `Date` variants is allowed
+      makeDeterminismSuccessTest("Date('December 17, 1995 03:24:00');"),
+      makeDeterminismSuccessTest("new Date('December 17, 1995 03:24:00');")
     ],
 
     [
       /* The secondary args here are the expected error
       IDs (which line up with the banned functions tested) */
-      makeDetFailureTest("Date();", ["Date"]),
-      makeDetFailureTest("new Date();", ["Date"]),
-      makeDetFailureTest("Math.random();", ["Math.random"]),
-      makeDetFailureTest("console.log(\"Hello!\");", ["console.log"]),
-      makeDetFailureTest("setTimeout(a, b);", ["setTimeout"]),
-      makeDetFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
-      makeDetFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
+      makeDeterminismFailureTest("Date();", ["Date"]),
+      makeDeterminismFailureTest("new Date();", ["Date"]),
+      makeDeterminismFailureTest("Math.random();", ["Math.random"]),
+      makeDeterminismFailureTest("console.log(\"Hello!\");", ["console.log"]),
+      makeDeterminismFailureTest("setTimeout(a, b);", ["setTimeout"]),
+      makeDeterminismFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
+      makeDeterminismFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
     ]
   ],
 
   ["allowed/not allowed awaits",
     [
 
-      makeDetSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
-      makeDetSuccessTest("await new Set();"), // TODO: definitely make this not allowed
+      makeDeterminismSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
+      makeDeterminismSuccessTest("await new Set();"), // TODO: definitely make this not allowed
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #1
-      makeDetSuccessTest(
+      makeDeterminismSuccessTest(
         "await ctxt.foo();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
-      makeDetSuccessTest(
+      makeDeterminismSuccessTest(
         "await ctxt.invoke(ShopUtilities).retrieveOrder(order_id);",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #3
-      makeDetSuccessTest(
+      makeDeterminismSuccessTest(
         "await ctxt.client<User>('users').select('password').where({ username }).first();",
         { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
       ),
 
       // Awaiting on a leftmost non-`WorkflowContext` type, but you pass a `WorkflowContext` in
-      makeDetSuccessTest(
+      makeDeterminismSuccessTest(
         `
         async function workflowHelperFunction(ctxt: WorkflowContext) {
           return await ctxt.baz();
@@ -363,10 +363,10 @@ const testSet: TestSet = [
 
     [
       // Awaiting on a not-allowed function, #1
-      makeDetFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
+      makeDeterminismFailureTest("await fetch('https://www.google.com');", ["awaitingOnNotAllowedType"]),
 
       // Awaiting on a not-allowed function, #2
-      makeDetFailureTest(`
+      makeDeterminismFailureTest(`
         async function foo() {
           return 5;
         }
@@ -377,27 +377,27 @@ const testSet: TestSet = [
       ),
 
       // Awaiting on a not-allowed class, #1
-      makeDetFailureTest(
+      makeDeterminismFailureTest(
         "const x = new Set(); await x.foo();",
         ["awaitingOnNotAllowedType"]
       ),
 
       // Awaiting on a not-allowed class, #2
-      makeDetFailureTest(
+      makeDeterminismFailureTest(
         "await fooBar.foo();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #3
-      makeDetFailureTest(
+      makeDeterminismFailureTest(
         "await fooBar.invoke(ShopUtilities).retrieveOrder(order_id);",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
       ),
 
       // Awaiting on a not-allowed class, #4
-      makeDetFailureTest(
+      makeDeterminismFailureTest(
         "await fooBar.client<User>('users').select('password').where({ username }).first();",
         ["awaitingOnNotAllowedType"],
         { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
