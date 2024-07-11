@@ -118,10 +118,14 @@ const testSet: TestSet = [
       makeExpectedSqlInjectionFailureTest(`
         let foo = "xyz" + "zyw";
         foo = "xyz" + "zyw";
+
+        foo = foo + foo, bar = "def" + foo;
+
         ctxt.client.raw(foo); // Error
         ctxt.client.raw(foo); // Error
+        ctxt.client.raw(bar); // Error
       `,
-        Array(2).fill("sqlInjection")
+        Array(3).fill("sqlInjection")
       ),
 
       makeExpectedSqlInjectionFailureTest(`
@@ -192,6 +196,7 @@ const testSet: TestSet = [
       `
       let x = 3;
       let y = {a: 1, b: 2};
+      let z = 256;
 
       class Bar {
         @Workflow()
@@ -200,8 +205,13 @@ const testSet: TestSet = [
           this.x = 4; // Allowed
           y.a += 1; // Not allowed
 
-          // TODO: make this get caught
-          // x = 23 + x, x = 24 + x;
+          z = [y, y = z][0]; // Not allowed (this is a funky variable swap)
+
+          x = 23 + x, y.a = 24 + x; // Two global modifications, so not allowed
+
+          let x = 5; // x is now local
+          x = 23 + x, y.a = 24 + x; // One local, one global (the right one is not allowed)
+          y.a = 23 + x, x = 24 + x; // One global, one local (the left one is not allowed)
 
           let y = {a: 3, b: 4}; // Aliases the global 'y'
           y.a = 1; // Not a global modification anymore
@@ -230,7 +240,7 @@ const testSet: TestSet = [
           }
         }
       }`,
-      Array(5).fill("globalModification") // Expecting 5 errors
+      Array(11).fill("globalModification")
     )]
   ],
 

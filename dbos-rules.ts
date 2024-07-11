@@ -41,6 +41,25 @@ const errorMessages = makeErrorMessageSet();
 const checkSqlInjectionDecorators = new Set(["Transaction"]);
 const validOrmClientNames = new Set(["PoolClient", "PrismaClient", "TypeORMEntityManager", "Knex"]);
 
+const assignmentTokenKinds = new Set([
+  SyntaxKind.EqualsToken,
+  SyntaxKind.PlusEqualsToken,
+  SyntaxKind.MinusEqualsToken,
+  SyntaxKind.AsteriskEqualsToken,
+  SyntaxKind.AsteriskAsteriskEqualsToken,
+  SyntaxKind.SlashEqualsToken,
+  SyntaxKind.PercentEqualsToken,
+  SyntaxKind.LessThanLessThanEqualsToken,
+  SyntaxKind.GreaterThanGreaterThanEqualsToken,
+  SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken,
+  SyntaxKind.AmpersandEqualsToken,
+  SyntaxKind.BarEqualsToken,
+  SyntaxKind.BarBarEqualsToken,
+  SyntaxKind.AmpersandAmpersandEqualsToken,
+  SyntaxKind.QuestionQuestionEqualsToken,
+  SyntaxKind.CaretEqualsToken
+]);
+
 ////////// This is the set of error messages that can be emitted
 
 function makeErrorMessageSet(): Map<string, string> {
@@ -117,32 +136,35 @@ function functionHasDecoratorInSet(fnDecl: FunctionOrMethod, decoratorSet: Set<s
   );
 }
 
-////////// These functions are the determinism heuristics that I've written
+/* This returns the lvalue and rvalue for an assignment,
+if the node is an assignment expression and the lvalue is an identifier */
+function maybeGetLAndRValuesForAssignment(node: Node): [Identifier, Expression] | undefined {
+  if (Node.isBinaryExpression(node)) {
+    const operatorKind = node.getOperatorToken().getKind();
 
-// TODO: use this in more places (if not, inline)
-function getIdentifierIfVariableModification(node: Node): Identifier | undefined {
-  if (Node.isExpressionStatement(node)) {
-    const subexpr = node.getExpression();
-
-    if (Node.isBinaryExpression(subexpr)) {
-      const lhs = reduceNodeToLeftmostLeaf(subexpr.getLeft());
-      if (Node.isIdentifier(lhs)) return lhs;
-
-      /* TODO: catch these types of assignment too: `[a, b] = [b, a]`, and `b = [a, a = b][0]`.
-      Could I solve that by checking for equals signs, and then a variable, or array with variables in it,
-      on the lefthand side?
-
-      Also make sure that e.g. `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` works. */
+    if (assignmentTokenKinds.has(operatorKind)) {
+      /* Reducing from `a.b.c` to `a`, or just `a` to `a`.
+      Also, note that `lhs` means lefthand side. */
+      const lhs = reduceNodeToLeftmostLeaf(node.getLeft());
+      if (Node.isIdentifier(lhs)) return [lhs, node.getRight()];
     }
   }
 }
 
-const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
-  const maybeIdentifier = getIdentifierIfVariableModification(node);
+////////// These functions are the determinism heuristics that I've written
 
-  if (maybeIdentifier !== undefined && !isLocal(maybeIdentifier.getText())) {
+const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
+  const maybeResult = maybeGetLAndRValuesForAssignment(node); // `lhs` = lefthand side
+
+  if (maybeResult !== undefined && !isLocal(maybeResult[0].getText())) {
     return "globalModification";
   }
+
+  /*
+  Note that `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` both work,
+  along with variable swaps in the style of `b = [a, a = b][0]`.
+  TODO: catch spread assignments like this one: `[a, b] = [b, a]`.
+  */
 }
 
 /* TODO: should I ban more IO functions, like `fetch`,
@@ -270,6 +292,9 @@ function checkCallForInjection(callName: string, identifiers: Identifier[],
   // In this case, trace it to its every assignment, and see if it's not ever set to a plain string literal
   if (Node.isIdentifier(callParam)) {
     for (const reference of getReferencesToIdentifier(fn, callParam)) {
+
+      ////////// First step, try getting a reduced parameter by checking the RHS of the parent
+
       let reducedParam: Node | undefined = undefined;
 
       const parent = reference.getParent();
@@ -280,19 +305,25 @@ function checkCallForInjection(callName: string, identifiers: Identifier[],
         if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
         reducedParam = initialValue;
       }
-      else if (Node.isExpression(parent) && parent.getChildAtIndex(1).getText() === "=") {
-        reducedParam = parent.getChildAtIndex(2);
-      }
       else {
-        // throw new Error(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
-        continue;
+        const result = maybeGetLAndRValuesForAssignment(parent);
+
+        if (result !== undefined) {
+          reducedParam = result[1];
+        }
+        else {
+          // throw new Error(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
+          continue;
+        }
       }
+
+      ////////// Check the reduced parameter that we got
 
       // If it was traced back to be an identifier, then recur again
       if (Node.isIdentifier(reducedParam)) {
         return checkCallForInjection(callName, identifiers, reducedParam, fn);
       }
-
+      // If it's not an identifier, check that it's a valid rvalue
       else if (!isAllowedRValueForSQL(reducedParam)) {
         return constructError(reducedParam);
       }
@@ -325,6 +356,7 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
     }
 
     if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
+      // TODO: just return this directly
       const errors = checkCallForInjection("raw", identifiers, callArgs[0], fn);
       if (errors !== undefined) return errors;
     }
@@ -350,10 +382,9 @@ function analyzeFunction(fn: FunctionOrMethod) {
   any exceptions to exit outside `analyzeFunction` would lead
   to the stack getting reset if `analyzeFunction` is called again). */
 
-  // This maps locals to their initializers
-  const stack: Map<string, Expression | undefined>[] = [new Map()];
+  const stack: Set<string>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
-  const pushFrame = () => stack.push(new Map());
+  const pushFrame = () => stack.push(new Set());
   const popFrame = () => stack.pop();
   const isLocal = (name: string) => stack.some((frame) => frame.has(name));
 
@@ -390,7 +421,7 @@ function analyzeFunction(fn: FunctionOrMethod) {
     }
     // Note: parameters are not considered to be locals here (modifying them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
-      locals.set(node.getName(), node.getInitializer());
+      locals.add(node.getName());
     }
     else if (functionHasDecoratorInSet(fn, deterministicDecorators)) {
       detCheckers.forEach((detChecker) => runErrorChecker(detChecker, node));
