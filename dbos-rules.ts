@@ -287,6 +287,12 @@ function checkCallForInjection(callName: string, identifiers: Identifier[],
 
   Questions:
   - Should I use the function `Node.isVariableDeclarationList` at all?
+
+  A reduced allowed value is either a literal string, or a variable that reduces down to a literal string. Acronym: RAV.
+  Here's the authority on what's allowed for SQL string parameters (from a supported callsite):
+    1. RAVs (this is implemented)
+    2. RAVs concatenated with other RAVs (TODO: implement)
+    3. Variables that reduce down to RAVs concatenated with other RAVs (TODO: implement)
   */
 
   // In this case, trace it to its every assignment, and see if it's not ever set to a plain string literal
