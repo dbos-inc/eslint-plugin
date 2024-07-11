@@ -191,7 +191,7 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
   if (Node.isCallExpression(node) || Node.isNewExpression(node)) {
     /* Doing this to make syntax like `Math. random` be reduced to `Math.random`
     (although this might not work for more complicated function call layouts).
-    TODO: make this fully robust. */
+    If I have to make more complicated function calls, make this call more robust. */
 
     const expr = node.getExpression();
     const kids = expr.getChildren();
