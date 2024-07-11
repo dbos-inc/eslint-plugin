@@ -329,7 +329,6 @@ function checkCallForInjection(callName: string, identifiers: Identifier[],
       }
     }
   }
-
   else if (!isAllowedRValueForSQL(callParam)) {
     return constructError(callParam);
   }
