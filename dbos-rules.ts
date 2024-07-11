@@ -306,32 +306,20 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
 
   /* If the node's value is undefined, it hasn't been explored yet.
   If it's false, it's not LR. If it's true, it's LR, or currently being
-  computed (which can indicate the existance of a reference cycle). */
+  computed (which can indicate the existance of a reference cycle).
+
+  Also, it's worthy of noting that I'm not doing this result caching
+  for the sake of efficiency, it's so that reference cycles won't result
+  in infinite recursion. */
   let nodeLRResults: Map<Node, boolean> = new Map();
 
-  // TODO: probably inline this into `IsLR` somehow
-  function wrapperIsLR(node: Node): boolean {
-    const maybeResult = nodeLRResults.get(node);
-
-    if (maybeResult !== undefined) {
-      return maybeResult;
-    }
-    else {
-      // Ending up in a cycle (e.g. from `z = z + "foo";`) will mark the node as LR
-      nodeLRResults.set(node, true);
-      const wasLR = isLR(node);
-      nodeLRResults.set(node, wasLR);
-      return wasLR;
-    }
-  }
-
-  function isLR(node: Node): boolean {
+  function isLRWithoutResultCache(node: Node): boolean {
     if (Node.isStringLiteral(node)) {
       return true;
     }
     else if (Node.isIdentifier(node)) {
       for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
-        if (!wrapperIsLR(rvalueAssigned)) return false;
+        if (!isLR(rvalueAssigned)) return false;
       }
 
       return true;
@@ -340,15 +328,31 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     works for the assumed `+` too! And, test parens around string groupings, and
     other binary operators too. */
     else if (Node.isBinaryExpression(node)) {
-      return wrapperIsLR(node.getLeft()) && wrapperIsLR(node.getRight());
+      return isLR(node.getLeft()) && isLR(node.getRight());
     }
     else {
       return false;
     }
   }
 
-  if (!wrapperIsLR(callParam)) {
-    // TODO: report the node that failed the check (to get the right line number)
+  function isLR(node: Node): boolean {
+    const maybeResult = nodeLRResults.get(node);
+
+    if (maybeResult !== undefined) {
+      return maybeResult;
+    }
+    else {
+      // Ending up in a cycle (e.g. from `z = z + "foo";`) will mark the node as LR
+      nodeLRResults.set(node, true);
+      const wasLR = isLRWithoutResultCache(node);
+      nodeLRResults.set(node, wasLR);
+      return wasLR;
+    }
+  }
+
+
+  if (!isLR(callParam)) {
+    // TODO: report the node that failed the check, in order to get the right line number
     const lineNumber = callParam.getSourceFile().getLineAndColumnAtPos(callParam.getStart()).line;
     return ["sqlInjection", {lineNumber: lineNumber}];
   }
