@@ -129,7 +129,7 @@ const testSet: TestSet = [
 
         // Variables -> variables -> ... -> literals
 
-        // Literal concatenation
+        // Literal concatenation (TODO: make adding parentheses in not fail)
         ctxt.client.raw("foo" + "bar" + "baz" + "bam");
 
         // Literal + variable concatenation
@@ -209,11 +209,10 @@ const testSet: TestSet = [
 
     [
       makeSqlInjectionFailureTest(`
+        const bam = foo + foo + foo + bar + baz + "foo" + "bar";
+        ctxt.client.raw(bam + (5).toString()); // Concatenating a literal-reducible string with one that is not
 
-        const bam = foo + foo + foo + bar + baz + "foo" + "bar", num = 5;
-        ctxt.client.raw(bam + num.toString()); // Concatenating a literal-reducible string with one that is not
-
-        const asVar = bam + num.toString();
+        const asVar = bam + (5).toString();
         ctxt.client.raw(asVar);
 
         {
@@ -221,8 +220,24 @@ const testSet: TestSet = [
           const asVar = "this one is literal";
           ctxt.client.raw(asVar); // This does not (we now have a different local with the same name)
         }
+
+        // Testing the += operator
+        let foo = "foo";
+        foo += foo + foo + "bar" + (5).toString();
+        ctxt.client.raw(foo);
+        ctxt.client.raw(foo + "a");
+        ctxt.client.raw(foo += "a");
+
+        console.log("Hello!"); // This is allowed in a non-workflow function
+
+        class SubClass {
+          @Transaction()
+          subFn(ctxt: TransactionContext<Knex>, p: string) {
+            ctxt.client.raw(p); // TODO: make this fail
+          }
+        }
       `,
-        Array(2).fill("sqlInjection")
+        Array(5).fill("sqlInjection")
       )
     ]
   ],
