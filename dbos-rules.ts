@@ -29,6 +29,7 @@ type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
+
 // This returns `undefined` for no error; otherwise, it returns a just key to the `errorMessages` map, or a key paired with info for error string formatting
 type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
 
@@ -155,7 +156,7 @@ function functionHasDecoratorInSet(fnDecl: FnDecl, decoratorSet: Set<string>): b
 
 /* This returns the lvalue and rvalue for an assignment,
 if the node is an assignment expression and the lvalue is an identifier */
-function maybeGetLAndRValuesForAssignment(node: Node): [Identifier, Expression] | undefined {
+function getLAndRValuesIfAssignment(node: Node): [Identifier, Expression] | undefined {
   if (Node.isBinaryExpression(node)) {
     const operatorKind = node.getOperatorToken().getKind();
 
@@ -171,9 +172,9 @@ function maybeGetLAndRValuesForAssignment(node: Node): [Identifier, Expression] 
 ////////// These functions are the determinism heuristics that I've written
 
 const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
-  const maybeResult = maybeGetLAndRValuesForAssignment(node); // `lhs` = lefthand side
+  const maybeLAndRValues = getLAndRValuesIfAssignment(node);
 
-  if (maybeResult !== undefined && !isLocal(maybeResult[0].getText())) {
+  if (maybeLAndRValues !== undefined && !isLocal(maybeLAndRValues[0].getText())) {
     return "globalModification";
   }
 
@@ -191,6 +192,7 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
     /* Doing this to make syntax like `Math. random` be reduced to `Math.random`
     (although this might not work for more complicated function call layouts).
     TODO: make this fully robust. */
+
     const expr = node.getExpression();
     const kids = expr.getChildren();
     const text = (kids.length === 0) ? expr.getText() : kids.map((node) => node.getText()).join("");
@@ -210,7 +212,7 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
 const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
 
-  ////////// This is a little utility function used below
+  //////////
 
   // If the valid type set and arg type set intersect, then there's a valid type in the args
   function validTypeExistsInFunctionCallParams(functionCall: CallExpression, validTypes: Set<string>): boolean {
@@ -218,8 +220,6 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
     const argTypes = functionCall.getArguments().map(getTypeNameForTsMorphNode);
     return argTypes.some((argType) => validTypes.has(argType));
   }
-
-  //////////
 
   if (Node.isAwaitExpression(node)) {
     const functionCall = node.getExpression();
@@ -234,6 +234,8 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
       // Throwing an error here, since I want to catch what this could be, and maybe revise the code below
       else panic(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
     }
+
+    //////////
 
     const typeName = getTypeNameForTsMorphNode(lhs);
     const awaitingOnAllowedType = awaitableTypes.has(typeName);
@@ -256,6 +258,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
 function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Node> {
   // TODO: use `forEachDescendant` to avoid the allocation here
   for (const otherUsage of fnDecl.getBody()!.getDescendantsOfKind(SyntaxKind.Identifier)) {
+
     // Not the same node, and has the same symbol
     const isTheSameUsedInAnotherPlace = (identifier !== otherUsage && identifier.getSymbol() === otherUsage.getSymbol());
     if (!isTheSameUsedInAnotherPlace) continue;
@@ -269,39 +272,32 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
       yield initialValue;
     }
     else {
-        const maybeLAndRValues = maybeGetLAndRValuesForAssignment(parent);
+        const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
 
         if (maybeLAndRValues !== undefined) {
           yield maybeLAndRValues[1];
         }
+        /*
         else {
-          // panic(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
-          continue;
+          panic(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
         }
+        */
     }
   }
 }
 
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
-  /* TODO for this:
-  - Check for recursion (e.g. `x = y`, then `y = x`). If I can't solve that, then just limit my recursion depth.
-  - Allow for literal strings to be concatenated (so expand `isAllowedRValueForSQL to allow this, and identifiers that are literals when traced too)
+  /* TODO:
   - Do not allow format strings
-  - Use the same mutation detection logic here as in `getIdentifierIfVariableModification`
   - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
-  - Clean up this TODO list
 
-  Questions:
-  - Should I use the function `Node.isVariableDeclarationList` at all?
-
+  Spec:
   A reduced allowed value is either a literal string, or a variable that reduces down to a literal string. Acronym: RAV.
   Here's the authority on what's allowed for SQL string parameters (from a supported callsite):
     1. RAVs (this is implemented)
     2. RAVs concatenated with other RAVs (TODO: implement)
     3. Variables that reduce down to RAVs concatenated with other RAVs (TODO: implement)
   */
-
-  // TODO: perhaps also check if other stuff is added to the string that I'm checking (with the `+=` operator)
 
   /* I could use just booleans here for the explored state
   (`IsBeingComputed` is functionally the same as `IsRAV`),
@@ -533,8 +529,10 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   }
 }
 
-/* Take a look at these functions later on:
-isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName
+/*
+- Take a look at these functions later on:
+isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName, isVariableDeclarationList
+
 - Check function expressions and arrow functions for mutation (and interfaces?)
 - Check for recursive global mutation for expected-to-be-deterministic functions
 - Check for classes when assigned to a variable (like `const Foo = class ...`), and then scanning those
