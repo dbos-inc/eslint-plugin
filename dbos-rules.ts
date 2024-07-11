@@ -25,12 +25,12 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 ////////// These are some shared types
 
 // TODO: support `FunctionExpression` and `ArrowFunction` too
-type FunctionOrMethod = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration; // TODO: add `Decl` as a suffix, and also for its variable usages
+type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
 // This returns `undefined` for no error; otherwise, it returns a just key to the `errorMessages` map, or a key paired with info for error string formatting
-type ErrorChecker = (node: Node, fn: FunctionOrMethod, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
+type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
 
 ////////// These are some shared values used throughout the code
 
@@ -147,7 +147,7 @@ function analyzeClass(theClass: ClassDeclaration) {
   theClass.getMethods().forEach(analyzeFunction);
 }
 
-function functionHasDecoratorInSet(fnDecl: FunctionOrMethod, decoratorSet: Set<string>): boolean {
+function functionHasDecoratorInSet(fnDecl: FnDecl, decoratorSet: Set<string>): boolean {
   return fnDecl.getModifiers().some((modifier) =>
     Node.isDecorator(modifier) && decoratorSet.has(modifier.getName())
   );
@@ -170,7 +170,7 @@ function maybeGetLAndRValuesForAssignment(node: Node): [Identifier, Expression] 
 
 ////////// These functions are the determinism heuristics that I've written
 
-const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
+const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
   const maybeResult = maybeGetLAndRValuesForAssignment(node); // `lhs` = lefthand side
 
   if (maybeResult !== undefined && !isLocal(maybeResult[0].getText())) {
@@ -186,7 +186,7 @@ const mutatesGlobalVariable: ErrorChecker = (node, _fn, isLocal) => {
 
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
-const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
+const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
   if (Node.isCallExpression(node) || Node.isNewExpression(node)) {
     /* Doing this to make syntax like `Math. random` be reduced to `Math.random`
     (although this might not work for more complicated function call layouts).
@@ -207,7 +207,7 @@ const callsBannedFunction: ErrorChecker = (node, _fn, _isLocal) => {
   }
 }
 
-const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
+const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
   // TODO: match against `.then` as well (with a promise object preceding it)
 
   ////////// This is a little utility function used below
@@ -253,9 +253,9 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fn, _isLocal) => {
 
 ////////// This code is for detecting SQL injections
 
-function* getRValuesAssignedToIdentifier(fn: FunctionOrMethod, identifier: Identifier): Generator<Node> {
+function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Node> {
   // TODO: use `forEachDescendant` to avoid the allocation here
-  for (const otherUsage of fn.getBody()!.getDescendantsOfKind(SyntaxKind.Identifier)) {
+  for (const otherUsage of fnDecl.getBody()!.getDescendantsOfKind(SyntaxKind.Identifier)) {
     // Not the same node, and has the same symbol
     const isTheSameUsedInAnotherPlace = (identifier !== otherUsage && identifier.getSymbol() === otherUsage.getSymbol());
     if (!isTheSameUsedInAnotherPlace) continue;
@@ -282,7 +282,7 @@ function* getRValuesAssignedToIdentifier(fn: FunctionOrMethod, identifier: Ident
   }
 }
 
-function checkCallForInjection(callParam: Node, fn: FunctionOrMethod): ErrorMessageIdWithFormatData | undefined {
+function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
   /* TODO for this:
   - Check for recursion (e.g. `x = y`, then `y = x`). If I can't solve that, then just limit my recursion depth.
   - Allow for literal strings to be concatenated (so expand `isAllowedRValueForSQL to allow this, and identifiers that are literals when traced too)
@@ -342,7 +342,7 @@ function checkCallForInjection(callParam: Node, fn: FunctionOrMethod): ErrorMess
       return true;
     }
     else if (Node.isIdentifier(node)) {
-      for (const rvalueAssigned of getRValuesAssignedToIdentifier(fn, node)) {
+      for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
         if (!wrapperIsRAV(rvalueAssigned)) return false;
       }
 
@@ -366,7 +366,7 @@ function checkCallForInjection(callParam: Node, fn: FunctionOrMethod): ErrorMess
   }
 }
 
-const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
+const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
     const subexpr = node.getExpression();
 
@@ -388,7 +388,7 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
 
     if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
       // TODO: just return this directly
-      const errors = checkCallForInjection(callArgs[0], fn);
+      const errors = checkCallForInjection(callArgs[0], fnDecl);
       if (errors !== undefined) return errors;
     }
     else {
@@ -399,8 +399,8 @@ const isSqlInjection: ErrorChecker = (node, fn, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-function analyzeFunction(fn: FunctionOrMethod) {
-  const body = fn.getBody();
+function analyzeFunction(fnDecl: FnDecl) {
+  const body = fnDecl.getBody(); // TODO: use the or-throw variant here
   if (body === undefined) panic("When would a function not have a body?");
 
   /* Note that each stack is local to each function,
@@ -421,7 +421,7 @@ function analyzeFunction(fn: FunctionOrMethod) {
   const detCheckers: ErrorChecker[] = [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType];
 
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
-    const response = errorChecker(node, fn, isLocal);
+    const response = errorChecker(node, fnDecl, isLocal);
 
     if (response !== undefined) {
       let [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
@@ -453,11 +453,11 @@ function analyzeFunction(fn: FunctionOrMethod) {
     else if (Node.isVariableDeclaration(node)) {
       locals.add(node.getName());
     }
-    else if (functionHasDecoratorInSet(fn, deterministicDecorators)) {
+    else if (functionHasDecoratorInSet(fnDecl, deterministicDecorators)) {
       detCheckers.forEach((detChecker) => runErrorChecker(detChecker, node));
       // console.log(`Not accounted for (det function, ${node.getKindName()})... (${node.print()})`);
     }
-    else if (functionHasDecoratorInSet(fn, checkSqlInjectionDecorators)) {
+    else if (functionHasDecoratorInSet(fnDecl, checkSqlInjectionDecorators)) {
       runErrorChecker(isSqlInjection, node);
     }
     else {
