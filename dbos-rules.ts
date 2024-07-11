@@ -255,33 +255,47 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
 
 ////////// This code is for detecting SQL injections
 
+// This function scans the function body, and finds all references to the given identifier (excluding the one passed in)
 function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Node> {
-  // TODO: use `forEachDescendant` to avoid the allocation here
-  for (const otherUsage of fnDecl.getBody()!.getDescendantsOfKind(SyntaxKind.Identifier)) {
+  yield* checkNodeAndItsChildren(fnDecl.getBody()!);
 
-    // Not the same node, and has the same symbol
-    const isTheSameUsedInAnotherPlace = (identifier !== otherUsage && identifier.getSymbol() === otherUsage.getSymbol());
-    if (!isTheSameUsedInAnotherPlace) continue;
+  function* checkNodeAndItsChildren(node: Node): Generator<Node> {
+    for (const child of node.getChildren()) {
+      yield* checkNodeAndItsChildren(child);
 
-    const parent = otherUsage.getParent();
-    if (parent === undefined) panic("When would the parent to a reference ever not be defined?");
+      ////////// First, see if the child should be checked or nto
 
-    if (Node.isVariableDeclaration(parent)) {
-      const initialValue = parent.getInitializer();
-      if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
-      yield initialValue;
-    }
-    else {
-        const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
+      // Not the same node, child is an identifier, and child has the same symbol
+      const isTheSameButUsedInAnotherPlace = (
+        identifier !== child
+        && identifier.getKind() === SyntaxKind.Identifier
+        && identifier.getSymbol() === child.getSymbol()
+      );
 
-        if (maybeLAndRValues !== undefined) {
-          yield maybeLAndRValues[1];
-        }
-        /*
-        else {
-          panic(`Unrecognized assignment case! Here is the parent: '${parent.print()} (type: ${parent.getKindName()})`);
-        }
-        */
+      if (!isTheSameButUsedInAnotherPlace) continue;
+
+      //////////
+
+      const parent = child.getParent();
+      if (parent === undefined) panic("When would the parent to a reference ever not be defined?");
+
+      if (Node.isVariableDeclaration(parent)) {
+        const initialValue = parent.getInitializer();
+        if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
+        yield initialValue;
+      }
+      else {
+          const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
+
+          if (maybeLAndRValues !== undefined) {
+            yield maybeLAndRValues[1];
+          }
+          /*
+          else {
+            panic(`Unrecognized assignment case! Here is the parent: '${parent.print()}' (type: ${parent.getKindName()})`);
+          }
+          */
+      }
     }
   }
 }
