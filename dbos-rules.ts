@@ -30,7 +30,7 @@ type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServices
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
 
-// This returns `undefined` for no error; otherwise, it returns a just key to the `errorMessages` map, or a key paired with info for error string formatting
+// This returns `undefined` for no error; otherwise, it returns a key to the `errorMessages` map, or a key paired with info for error string formatting
 type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
 
 ////////// These are some shared values used throughout the code
@@ -77,7 +77,7 @@ function makeErrorMessageSet(): Map<string, string> {
   const makeDateMessage = (bannedCall: string) => `Calling ${bannedCall} is banned \
 (consider using \`@dbos-inc/communicator-datetime\` for consistency and testability)`;
 
-  // TODO: update this message if more types are added in the future to `deterministicDecorators` or `awaitableTypes`
+  // TODO: update this message if more types are added in the future to the `Workflow` key in `decoratorSetErrorCheckerMapping` below, or `awaitableTypes` above
   const awaitMessage = `The enclosing workflow makes an asynchronous call to a non-DBOS function. \
 Please verify that this call is deterministic or it may lead to non-reproducible behavior`;
 
@@ -414,8 +414,8 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
 
 // Note: a workflow can never be a transaction, so no need to worry about overlap here
 const decoratorSetErrorCheckerMapping: Map<Set<string>, ErrorChecker[]> = new Map([
-  [new Set(["Transaction"]), [isSqlInjection]],
-  [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]]
+  [new Set(["Transaction"]), [isSqlInjection]], // Checking for SQL injection here
+  [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]] // Checking for nondeterminism here
 ]);
 
 function analyzeFunction(fnDecl: FnDecl) {
