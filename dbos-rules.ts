@@ -134,7 +134,7 @@ function panic(message: string): never {
 // This function exists so that I can make sure that my tests are reading valid symbols
 function getSymbolWrapper(value: Node | ts.Type): Symbol | ts.Symbol | undefined {
   return value.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
-  // return value.getSymbolOrThrow(`Expected a symbol for this node or type: ${value.getText()}`);
+  // return value.getSymbol() ?? panic(`Expected a symbol for a node or type`);
 }
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
