@@ -301,7 +301,6 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
   /* TODO:
   - Do not allow format strings
-  - Try a function with a string parameter, and test out concatenation from there
   - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
 
   A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
@@ -387,9 +386,7 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
     }
 
     if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
-      // TODO: just return this directly
-      const errors = checkCallForInjection(callArgs[0], fnDecl);
-      if (errors !== undefined) return errors;
+      return checkCallForInjection(callArgs[0], fnDecl);
     }
     else {
       panic(`${maybeOrmClientName} not implemented yet`);
@@ -406,8 +403,9 @@ const decoratorSetErrorCheckerMapping: Map<Set<string>, ErrorChecker[]> = new Ma
 ]);
 
 function analyzeFunction(fnDecl: FnDecl) {
-  const body = fnDecl.getBody(); // TODO: use the or-throw variant here
-  if (body === undefined) panic("When would a function not have a body?");
+  // A function declaration without a body: `declare function myFunction();`
+  const body = fnDecl.getBody();
+  if (body === undefined) return;
 
   /* Note that each stack is local to each function,
   so it's reset when a new function is entered
