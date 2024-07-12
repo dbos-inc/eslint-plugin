@@ -85,8 +85,8 @@ Please verify that this call is deterministic or it may lead to non-reproducible
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
   // The keys are the ids, and the values are the messages themselves
-  return new Map([
-    ["sqlInjection", "Possible SQL injection detected (The assignment on line {{ lineNumber }} involved nonliteral string concatenation)! Use prepared statements instead"],
+  return new Map([ // TODO: vary the error type ("involved nonliteral string concatenation", or "was a nonliteral parameter")
+    ["sqlInjection", "Possible SQL injection detected (The expression on line {{ lineNumber }} involved nonliteral string concatenation, or a function parameter)! Use prepared statements instead"],
     ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -253,20 +253,23 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
 ////////// This code is for detecting SQL injections
 
 // This function scans the function body, and finds all references to the given identifier (excluding the one passed in)
-function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Node> {
-  yield* checkNodeAndItsChildren(fnDecl.getBody()!);
+function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
+  for (const param of fnDecl.getParameters()) {
+    yield* getCorrespondingRValuesWithinNode(param);
+  }
 
-  function* checkNodeAndItsChildren(node: Node): Generator<Node> {
+  yield* getCorrespondingRValuesWithinNode(fnDecl);
+
+  function* getCorrespondingRValuesWithinNode(node: Node): Generator<Expression | "NotRValueButFnParam"> {
     for (const child of node.getChildren()) {
-      yield* checkNodeAndItsChildren(child);
+      yield* getCorrespondingRValuesWithinNode(child);
 
-      ////////// First, see if the child should be checked or nto
+      ////////// First, see if the child should be checked or not
 
-      // Not the same node, child is an identifier, and child has the same symbol
       const isTheSameButUsedInAnotherPlace = (
-        identifier !== child
-        && identifier.getKind() === SyntaxKind.Identifier
-        && identifier.getSymbol() === child.getSymbol()
+        child !== identifier // Not the same node as our identifier
+        && child.getKind() === SyntaxKind.Identifier // This child is an identifier
+        && child.getSymbol() === identifier.getSymbol() // They have the same symbol (this stops false positives from aliased values)
       );
 
       if (!isTheSameButUsedInAnotherPlace) continue;
@@ -287,11 +290,9 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
           if (maybeLAndRValues !== undefined) {
             yield maybeLAndRValues[1];
           }
-          /*
-          else {
-            panic(`Unrecognized assignment case! Here is the parent: '${parent.print()}' (type: ${parent.getKindName()})`);
+          else if (Node.isParameterDeclaration(parent)) {
+            yield "NotRValueButFnParam";
           }
-          */
       }
     }
   }
@@ -330,7 +331,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     }
     else if (Node.isIdentifier(node)) {
       for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
-        if (!isLR(rvalueAssigned)) return false;
+        if (rvalueAssigned === "NotRValueButFnParam" || !isLR(rvalueAssigned)) return false;
       }
 
       return true;
@@ -357,7 +358,6 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
       return wasLR;
     }
   }
-
 
   if (!isLR(callParam)) {
     // TODO: report the node that failed the check, in order to get the right line number

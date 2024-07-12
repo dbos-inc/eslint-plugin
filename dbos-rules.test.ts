@@ -72,7 +72,7 @@ function makeSqlInjectionCode(code: string): string {
 
     class Foo {
       @Transaction()
-      injectionTime(ctxt: TransactionContext<Knex>) {
+      injectionTime(ctxt: TransactionContext<Knex>, aParam: string) {
         ${code}
       }
     }
@@ -229,15 +229,26 @@ const testSet: TestSet = [
         ctxt.client.raw(foo += "a");
 
         console.log("Hello!"); // This is allowed in a non-workflow function
-
-        class SubClass {
-          @Transaction()
-          subFn(ctxt: TransactionContext<Knex>, p: string) {
-            ctxt.client.raw(p); // TODO: make this fail
-          }
-        }
       `,
         Array(5).fill("sqlInjection")
+      ),
+
+      makeSqlInjectionFailureTest(`
+        ctxt.client.raw(aParam); // Using a function parameter for a raw call is invalid
+
+        {
+          // ctxt.client.raw(aParam);
+
+          // Aliasing the function parameter, and making its usage valid (TODO: make this not make the statement above pass)
+          const aParam = "foo";
+          ctxt.client.raw(aParam);
+        }
+
+        ctxt.client.raw(aParam);
+        ctxt.client.raw(aParam + (5).toString()); // This fails for two reasons (but only shows one)
+        ctxt.client.raw((5).toString()); // And this fails like usual
+      `,
+        Array(4).fill("sqlInjection")
       )
     ]
   ],
