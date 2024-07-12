@@ -405,7 +405,7 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
       return checkCallForInjection(callArgs[0], fnDecl);
     }
     else {
-      panic(`${maybeOrmClientName} not implemented yet`);
+      // panic(`${maybeOrmClientName} not implemented yet (identifiers: ${identifiers.map((id) => id.getText()).join(", ")})`);
     }
   }
 }
