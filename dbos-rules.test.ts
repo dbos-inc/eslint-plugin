@@ -66,6 +66,10 @@ function makeSqlInjectionCode(code: string): string {
       }
     }
 
+    function Transaction(target: any, key: any, descriptor: any): any {
+      return descriptor;
+    }
+
     export interface TransactionContext<T extends UserDatabaseClient> extends DBOSContext {
       readonly client: T;
     }
@@ -185,7 +189,7 @@ const testSet: TestSet = [
 
       // Success test #5 (testing some reference cycle stuff)
       makeSqlInjectionSuccessTest(`
-        let foo = "xyz" + "zyw" + foo; // The last concatenation is invalid, but we're just testing circular reference detection
+        let bar, foo = "xyz" + "zyw" + foo; // The last concatenation is invalid, but we're just testing circular reference detection
         foo = "xyz" + "zyw";
         foo = foo + foo, bar = "def" + foo;
 
@@ -202,7 +206,7 @@ const testSet: TestSet = [
       // Success test #6 (testing dependent assignment in a variable declaration list, namely for `y`'s rvalue)
       makeSqlInjectionSuccessTest(`
         const x = "foo", y = "bar" + x + x;
-        ctxt.client.raw(x);
+        ctxt.client.raw(x + bar);
         ctxt.client.raw(y);
       `),
 
@@ -216,6 +220,7 @@ const testSet: TestSet = [
     [
       // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
+        const bar = "bar", baz = "baz";
         const bam = foo + foo + foo + bar + baz + "foo" + "bar";
         ctxt.client.raw(bam + (5).toString()); // Concatenating a literal-reducible string with one that is not
 
@@ -262,7 +267,7 @@ const testSet: TestSet = [
 
       // Failure test #3 (testing what happens when you call a function/method on a string)
       makeSqlInjectionFailureTest(`
-        const foo = "x".to_lowercase(); // No function calls may be applied to literal strings
+        const foo = "x".toLowerCase(); // No function calls may be applied to literal strings
         const bar = baz("x");
         ctxt.client.raw(foo);
         ctxt.client.raw(bar);

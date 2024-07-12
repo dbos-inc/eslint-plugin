@@ -4,7 +4,7 @@ import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } fr
 import {
   ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
-  MethodDeclaration, SyntaxKind, Expression, Identifier
+  MethodDeclaration, SyntaxKind, Expression, Identifier, Symbol
 } from "ts-morph";
 
 // Should I find TypeScript variants of these?
@@ -129,6 +129,12 @@ How hard is it to add a linter rule to always warn the user of this config setti
 
 function panic(message: string): never {
   throw new Error(message);
+}
+
+// This function exists so that I can make sure that my tests are reading valid symbols
+function getSymbolWrapper(value: Node | ts.Type): Symbol | ts.Symbol | undefined {
+  return value.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
+  // return value.getSymbolOrThrow(`Expected a symbol for this node or type: ${value.getText()}`);
 }
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
@@ -270,15 +276,14 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
       const isTheSameButUsedInAnotherPlace = (
         child !== identifier // Not the same node as our identifier
         && child.getKind() === SyntaxKind.Identifier // This child is an identifier
-        && child.getSymbol() === identifier.getSymbol() // They have the same symbol (this stops false positives from aliased values)
+        && getSymbolWrapper(child) === getSymbolWrapper(identifier) // They have the same symbol (this stops false positives from aliased values)
       );
 
       if (!isTheSameButUsedInAnotherPlace) continue;
 
       //////////
 
-      const parent = child.getParent();
-      if (parent === undefined) panic("When would the parent to a reference ever not be defined?");
+      const parent = child.getParent() ?? panic("When would the parent to a reference ever not be defined?");
 
       if (Node.isVariableDeclaration(parent)) {
         const initialValue = parent.getInitializer();
@@ -499,8 +504,11 @@ function makeTsMorphNode(eslintNode: EslintNode): Node {
 
 function makeEslintNode(tsMorphNode: Node): EslintNode {
   const compilerNode = tsMorphNode.compilerNode;
-  const eslintNode = GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode);
-  if (eslintNode === undefined) panic("Couldn't find the corresponding ESLint node!");
+
+  const eslintNode =
+    GLOBAL_TOOLS!.parserServices.tsNodeToESTreeNodeMap.get(compilerNode)
+    ?? panic("Couldn't find the corresponding ESLint node!");
+
   return eslintNode;
 }
 
@@ -515,7 +523,7 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
 
   // The name from the symbol is more minimal, so preferring that here when it's available
   const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
-  return type.getSymbol()?.getName() ?? typeChecker.typeToString(type);
+  return getSymbolWrapper(type)?.getName() ?? typeChecker.typeToString(type);
 }
 
 function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
