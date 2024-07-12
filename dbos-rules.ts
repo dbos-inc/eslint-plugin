@@ -382,6 +382,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
+  // TODO: support cases where it's just `client.raw` (without the `TransactionContext` part)
   if (Node.isCallExpression(node)) {
     const subexpr = node.getExpression();
 
