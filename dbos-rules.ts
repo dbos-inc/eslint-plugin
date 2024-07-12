@@ -86,7 +86,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([ // TODO: vary the error type ("involved nonliteral string concatenation", or "was a nonliteral parameter")
-    ["sqlInjection", "Possible SQL injection detected (The expression on line {{ lineNumber }} involved nonliteral string concatenation, or a function parameter)! Use prepared statements instead"],
+    ["sqlInjection", "Possible SQL injection detected (The expression on line {{ lineNumber }} involved a value that was not composed of literal string components)! Use prepared statements instead"],
     ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -260,6 +260,8 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 
   yield* getCorrespondingRValuesWithinNode(fnDecl);
 
+  //////////
+
   function* getCorrespondingRValuesWithinNode(node: Node): Generator<Expression | "NotRValueButFnParam"> {
     for (const child of node.getChildren()) {
       yield* getCorrespondingRValuesWithinNode(child);
@@ -300,7 +302,6 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
   /* TODO:
-  - Do not allow format strings
   - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
 
   A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
@@ -328,6 +329,16 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     if (Node.isStringLiteral(node)) {
       return true;
     }
+    /* i.e. if it's a format string (like `${foo} ${bar} ${baz}`).
+    I am not supporting tagged template expressions, since they involve
+    a function call. */
+    else if (Node.isTemplateExpression(node)) {
+      return node.getTemplateSpans().every((span) => {
+        // The first child is the contained value, and the second child is the end of the format specifier
+        if (span.getChildCount() !== 2) panic("Unexpected child count for a template expression span!");
+        return isLR(span.getChildAtIndex(0));
+      });
+    }
     else if (Node.isIdentifier(node)) {
       for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
         if (rvalueAssigned === "NotRValueButFnParam" || !isLR(rvalueAssigned)) return false;
@@ -343,6 +354,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     }
   }
 
+  // TODO: if it was not LR, then store the node that failed the check, in order to get the right line number
   function isLR(node: Node): boolean {
     const maybeResult = nodeLRResults.get(node);
 

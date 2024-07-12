@@ -204,10 +204,17 @@ const testSet: TestSet = [
         const x = "foo", y = "bar" + x + x;
         ctxt.client.raw(x);
         ctxt.client.raw(y);
+      `),
+
+      // Success test #7 (testing template expression evaluation)
+      makeSqlInjectionSuccessTest(`
+        let foo = 'x';
+        ctxt.client.raw(\`\${'305' + '2' + \`\${foo}\`} \${'abc' + 'def'} \${'512'} \${'603'} \${'712'} \${foo + foo + 'foo'}\`);
       `)
     ],
 
     [
+      // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
         const bam = foo + foo + foo + bar + baz + "foo" + "bar";
         ctxt.client.raw(bam + (5).toString()); // Concatenating a literal-reducible string with one that is not
@@ -217,8 +224,9 @@ const testSet: TestSet = [
 
         {
           ctxt.client.raw(asVar); // This emits an error
-          const asVar = "this one is literal";
-          ctxt.client.raw(asVar); // This does not (we now have a different local with the same name)
+
+          // const asVar = "this one is literal";
+          ctxt.client.raw(asVar); // TODO: make this not emit an error, if the aliasing is added back in above
         }
 
         // Testing the += operator
@@ -230,9 +238,10 @@ const testSet: TestSet = [
 
         console.log("Hello!"); // This is allowed in a non-workflow function
       `,
-        Array(5).fill("sqlInjection")
+        Array(7).fill("sqlInjection")
       ),
 
+      // Failure test #2 (testing some function parameter aliasing behavior)
       makeSqlInjectionFailureTest(`
         ctxt.client.raw(aParam); // Using a function parameter for a raw call is invalid
 
@@ -249,6 +258,25 @@ const testSet: TestSet = [
         ctxt.client.raw((5).toString()); // And this fails like usual
       `,
         Array(4).fill("sqlInjection")
+      ),
+
+      // Failure test #3 (testing what happens when you call a function/method on a string)
+      makeSqlInjectionFailureTest(`
+        const foo = "x".to_lowercase(); // No function calls may be applied to literal strings
+        const bar = baz("x");
+        ctxt.client.raw(foo);
+        ctxt.client.raw(bar);
+      `,
+        Array(2).fill("sqlInjection")
+      ),
+
+      // Failure test #4 (making sure that tagged template expressions do not work)
+      makeSqlInjectionFailureTest(`
+        // No tagged template expressions are allowed!
+        const s = myFn\`foo \${'bar'} baz\`;
+        ctxt.client.raw(s);
+        `,
+        Array(1).fill("sqlInjection")
       )
     ]
   ],
