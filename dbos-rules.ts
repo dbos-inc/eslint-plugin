@@ -206,17 +206,16 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
   }
 }
 
+// TODO: match against `.then` as well (with a promise object preceding it)
 const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
-  // TODO: match against `.then` as well (with a promise object preceding it)
-
-  //////////
-
   // If the valid type set and arg type set intersect, then there's a valid type in the args
   function validTypeExistsInFunctionCallParams(functionCall: CallExpression, validTypes: Set<string>): boolean {
     // I'd like to use `isDisjointFrom` here, but it doesn't seem to be available, for some reason
     const argTypes = functionCall.getArguments().map(getTypeNameForTsMorphNode);
     return argTypes.some((argType) => validTypes.has(argType));
   }
+
+  //////////
 
   if (Node.isAwaitExpression(node)) {
     const functionCall = node.getExpression();
