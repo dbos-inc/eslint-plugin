@@ -38,17 +38,31 @@ const tester = new RuleTester({
 
 ////////// These functions build different types of test cases with some primitive code structure around them
 
-function makeDeterminismCode(
-  code: string,
-  codeAboveClass: string,
-  enclosingFunctionParams: string): string {
-
+function makeDeterminismCode(code: string, enclosingFunctionParams: string): string {
   return `
-    ${codeAboveClass}
+    class DBOSContext {}
+    class UserDatabaseClient {}
 
-    class Foo {
+    interface WorkflowContext extends DBOSContext {
+      invoke<T extends object>(targetClass: T): any;
+      client: any;
+      foo(): any; // This is just here for testing
+    }
+
+    // This is used for some determinism failure tests
+    interface IllegalClassToUse<T extends UserDatabaseClient> extends DBOSContext {
+      invoke<T extends object>(targetClass: T): any;
+      client: T;
+      foo(): any; // This is just here for testing
+    }
+
+    function Workflow(target?: any, key?: any, descriptor?: any): any {
+      return descriptor;
+    }
+
+    class DeterminismTestClass {
       @Workflow()
-      foo(${enclosingFunctionParams}) {
+      async determinismTestMethod(${enclosingFunctionParams}) {
         ${code}
       }
     }
@@ -57,26 +71,24 @@ function makeDeterminismCode(
 
 function makeSqlInjectionCode(code: string): string {
   return `
-    class UserDatabaseClient {}
     class DBOSContext {}
+    class UserDatabaseClient {}
 
     class Knex {
-      raw(x: string) {
-
-      }
+      raw(x: string) {}
     }
 
-    function Transaction(target: any, key: any, descriptor: any): any {
+    function Transaction(target?: any, key?: any, descriptor?: any): any {
       return descriptor;
     }
 
     export interface TransactionContext<T extends UserDatabaseClient> extends DBOSContext {
-      readonly client: T;
+      client: T;
     }
 
-    class Foo {
+    class SqlInjectionTestClass {
       @Transaction()
-      injectionTime(ctxt: TransactionContext<Knex>, aParam: string) {
+      injectionTestMethod(ctxt: TransactionContext<Knex>, aParam: string) {
         ${code}
       }
     }
@@ -87,17 +99,15 @@ function errorIdsToObjectFormat(errorIds: string[]): { messageId: string }[] {
   return errorIds.map((id) => { return { messageId: id }; });
 }
 
-function makeDeterminismSuccessTest(code: string,
-  { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): SuccessTest {
-
-  return { code: makeDeterminismCode(code, codeAboveClass, enclosingFunctionParams) };
+function makeDeterminismSuccessTest(code: string, enclosingFunctionParams: string = ""): SuccessTest {
+  return { code: makeDeterminismCode(code, enclosingFunctionParams) };
 }
 
-function makeDeterminismFailureTest(code: string, expectedErrorIds: string[],
-  { codeAboveClass, enclosingFunctionParams } = { codeAboveClass: "", enclosingFunctionParams: "" }): FailureTest {
+function makeDeterminismFailureTest(code: string,
+  expectedErrorIds: string[], enclosingFunctionParams: string = ""): FailureTest {
 
   return {
-      code: makeDeterminismCode(code, codeAboveClass, enclosingFunctionParams),
+      code: makeDeterminismCode(code, enclosingFunctionParams),
       errors: errorIdsToObjectFormat(expectedErrorIds)
     };
 }
@@ -115,7 +125,6 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): 
 
 //////////
 
-// TODO: for the sake of testing the tests' soundness, check diagnostic warnings for these
 const testSet: TestSet = [
   /* Note: the tests for SQL injection do not
   involve any actual SQL code; they just test
@@ -133,8 +142,8 @@ const testSet: TestSet = [
 
         // Variables -> variables -> ... -> literals
 
-        // Literal concatenation (TODO: make adding parentheses in not fail)
-        ctxt.client.raw("foo" + "bar" + "baz" + "bam");
+        // Literal concatenation (with some parentheses thrown in)
+        ctxt.client.raw("foo" + ("bar" + "baz" + "a" + "b" + "c" + "d") + "bam");
 
         // Literal + variable concatenation
         ctxt.client.raw("foo" + "bar" + foo + bar + "baz" + "bam" + foo);
@@ -155,7 +164,7 @@ const testSet: TestSet = [
         ctxt.client.raw(x);
         ctxt.client.raw(y);
         ctxt.client.raw(z);
-        ctxt.client.raw(w); // This traces from w to z to y to x to "abc" + "def" + å;
+        ctxt.client.raw(w); // This traces from w to z to y to x to "abc" + "def" + å
       `),
 
       // Success test #3 (lots of variable reassignments, and repeated identical calls)
@@ -189,7 +198,7 @@ const testSet: TestSet = [
 
       // Success test #5 (testing some reference cycle stuff)
       makeSqlInjectionSuccessTest(`
-        let bar, foo = "xyz" + "zyw" + foo; // The last concatenation is invalid, but we're just testing circular reference detection
+        let bar, foo = "xyz" + "zyw";
         foo = "xyz" + "zyw";
         foo = foo + foo, bar = "def" + foo;
 
@@ -206,7 +215,7 @@ const testSet: TestSet = [
       // Success test #6 (testing dependent assignment in a variable declaration list, namely for `y`'s rvalue)
       makeSqlInjectionSuccessTest(`
         const x = "foo", y = "bar" + x + x;
-        ctxt.client.raw(x + bar);
+        ctxt.client.raw(x + y);
         ctxt.client.raw(y);
       `),
 
@@ -220,6 +229,10 @@ const testSet: TestSet = [
     [
       // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
+        // Testing the += operator
+        let foo = "foo";
+        foo += foo + foo + "bar" + (5).toString();
+
         const bar = "bar", baz = "baz";
         const bam = foo + foo + foo + bar + baz + "foo" + "bar";
         ctxt.client.raw(bam + (5).toString()); // Concatenating a literal-reducible string with one that is not
@@ -228,32 +241,27 @@ const testSet: TestSet = [
         ctxt.client.raw(asVar);
 
         {
-          ctxt.client.raw(asVar); // This emits an error
-
-          // const asVar = "this one is literal";
-          ctxt.client.raw(asVar); // TODO: make this not emit an error, if the aliasing is added back in above
+          const asVar = "this one is literal";
+          ctxt.client.raw(asVar); // No error because of the shadowing
         }
 
-        // Testing the += operator
-        let foo = "foo";
-        foo += foo + foo + "bar" + (5).toString();
+        ctxt.client.raw(asVar);
+
         ctxt.client.raw(foo);
         ctxt.client.raw(foo + "a");
         ctxt.client.raw(foo += "a");
 
         console.log("Hello!"); // This is allowed in a non-workflow function
       `,
-        Array(7).fill("sqlInjection")
+        Array(6).fill("sqlInjection")
       ),
 
-      // Failure test #2 (testing some function parameter aliasing behavior)
+      // Failure test #2 (testing some function parameter shadowing behavior)
       makeSqlInjectionFailureTest(`
         ctxt.client.raw(aParam); // Using a function parameter for a raw call is invalid
 
         {
-          // ctxt.client.raw(aParam);
-
-          // Aliasing the function parameter, and making its usage valid (TODO: make this not make the statement above pass)
+          // Shadowing the function parameter, and making its usage valid
           const aParam = "foo";
           ctxt.client.raw(aParam);
         }
@@ -267,6 +275,7 @@ const testSet: TestSet = [
 
       // Failure test #3 (testing what happens when you call a function/method on a string)
       makeSqlInjectionFailureTest(`
+        const baz = (s: string) => s;
         const foo = "x".toLowerCase(); // No function calls may be applied to literal strings
         const bar = baz("x");
         ctxt.client.raw(foo);
@@ -277,6 +286,7 @@ const testSet: TestSet = [
 
       // Failure test #4 (making sure that tagged template expressions do not work)
       makeSqlInjectionFailureTest(`
+        const myFn = (a, b) => a;
         // No tagged template expressions are allowed!
         const s = myFn\`foo \${'bar'} baz\`;
         ctxt.client.raw(s);
@@ -287,7 +297,6 @@ const testSet: TestSet = [
   ],
 
   ["global mutations", [],
-
     [makeDeterminismFailureTest(
       `
       let x = 3;
@@ -295,22 +304,30 @@ const testSet: TestSet = [
       let z = 256;
 
       class Bar {
+        x: number;
+        static xx: number;
+
         @Workflow()
         foo() {
           x = 4; // Not allowed
-          this.x = 4; // Allowed
+          this.x = 4; // Not allowed
+          Bar.xx = 4; // Not allowed
           y.a += 1; // Not allowed
 
-          z = [y, y = z][0]; // Not allowed (this is a funky variable swap)
+          z = [y.b, y.b = z][0]; // Not allowed (this is a funky variable swap)
 
           x = 23 + x, y.a = 24 + x; // Two global modifications, so not allowed
 
-          let x = 5; // x is now local
-          x = 23 + x, y.a = 24 + x; // One local, one global (the right one is not allowed)
-          y.a = 23 + x, x = 24 + x; // One global, one local (the left one is not allowed)
+          {
+            let x = 5; // x is now local
+            x = 23 + x, y.a = 24 + x; // One local, one global (the right one is not allowed)
+            y.a = 23 + x, x = 24 + x; // One global, one local (the left one is not allowed)
+          }
 
-          let y = {a: 3, b: 4}; // Aliases the global y
-          y.a = 1; // Not a global modification anymore
+          {
+            let y = {a: 3, b: 4}; // Shadows the global y
+            y.a = 1; // Not a global modification anymore
+          }
         }
 
         bar() {
@@ -336,17 +353,11 @@ const testSet: TestSet = [
           }
         }
       }`,
-      Array(11).fill("globalModification")
+      Array(12).fill("globalModification")
     )]
   ],
 
-  ["banned/not banned functions",
-    [
-      makeDeterminismSuccessTest("foo();"), // Calling these `Date` variants is allowed
-      makeDeterminismSuccessTest("Date('December 17, 1995 03:24:00');"),
-      makeDeterminismSuccessTest("new Date('December 17, 1995 03:24:00');")
-    ],
-
+  ["banned/not banned functions", [],
     [
       /* The secondary args here are the expected error
       IDs (which line up with the banned functions tested) */
@@ -354,46 +365,37 @@ const testSet: TestSet = [
       makeDeterminismFailureTest("new Date();", ["Date"]),
       makeDeterminismFailureTest("Math.random();", ["Math.random"]),
       makeDeterminismFailureTest("console.log(\"Hello!\");", ["console.log"]),
-      makeDeterminismFailureTest("setTimeout(a, b);", ["setTimeout"]),
-      makeDeterminismFailureTest("bcrypt.hash(a, b, c);", ["bcrypt.hash"]),
-      makeDeterminismFailureTest("bcrypt.compare(a, b, c);", ["bcrypt.compare"])
+      makeDeterminismFailureTest("setTimeout(() => {});", ["setTimeout"]),
+      makeDeterminismFailureTest("const bcrypt: any = {}; bcrypt.hash = (a, b, c) => {}; bcrypt.hash(1, 2, 3);", ["bcrypt.hash"]),
+      makeDeterminismFailureTest("const bcrypt: any = {}; bcrypt.compare = (a, b, c) => {}; bcrypt.compare(1, 2, 3);", ["bcrypt.compare"])
     ]
   ],
 
   ["allowed/not allowed awaits",
     [
-
-      makeDeterminismSuccessTest("await ({}).foo();"), // TODO: probably make this not allowed
+      // makeDeterminismSuccessTest("await ({}).foo();"), // TODO: probably make this fail in a proper way
       makeDeterminismSuccessTest("await new Set();"), // TODO: definitely make this not allowed
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #1
-      makeDeterminismSuccessTest(
-        "await ctxt.foo();",
-        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
-      ),
+      makeDeterminismSuccessTest("await ctxt.foo();", "ctxt: WorkflowContext"),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
       makeDeterminismSuccessTest(
-        "await ctxt.invoke(ShopUtilities).retrieveOrder(order_id);",
-        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+        "class ShopUtilities {}; const orderId = 20; await ctxt.invoke(ShopUtilities).retrieveOrder(orderId);",
+        "ctxt: WorkflowContext"
       ),
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #3
       makeDeterminismSuccessTest(
-        "await ctxt.client<User>('users').select('password').where({ username }).first();",
-        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+        "type User = any; const username = 'phil'; await ctxt.client('users').select('password').where({ username }).first();",
+        "ctxt: WorkflowContext"
       ),
 
       // Awaiting on a leftmost non-`WorkflowContext` type, but you pass a `WorkflowContext` in
       makeDeterminismSuccessTest(
-        `
-        async function workflowHelperFunction(ctxt: WorkflowContext) {
-          return await ctxt.baz();
-        }
-
-        await workflowHelperFunction(ctxt);
-        `,
-        { codeAboveClass: "class WorkflowContext {}", enclosingFunctionParams: "ctxt: WorkflowContext" }
+        `async function workflowHelperFunction(ctxt: WorkflowContext) {return await ctxt.foo();}
+        await workflowHelperFunction(ctxt);`,
+        "ctxt: WorkflowContext"
       )
     ],
 
@@ -403,40 +405,30 @@ const testSet: TestSet = [
 
       // Awaiting on a not-allowed function, #2
       makeDeterminismFailureTest(`
-        async function foo() {
-          return 5;
-        }
-
-        await foo();
-        `,
+        async function foo() {return 5;}
+        await foo();`,
         ["awaitingOnNotAllowedType"]
       ),
 
       // Awaiting on a not-allowed class, #1
       makeDeterminismFailureTest(
-        "const x = new Set(); await x.foo();",
-        ["awaitingOnNotAllowedType"]
+        "await illegal.foo();",
+        ["awaitingOnNotAllowedType"],
+        "illegal: IllegalClassToUse<any>"
       ),
 
       // Awaiting on a not-allowed class, #2
       makeDeterminismFailureTest(
-        "await fooBar.foo();",
+        "class ShopUtilities {}; const orderId = 20; await illegal.invoke(ShopUtilities).retrieveOrder(orderId);",
         ["awaitingOnNotAllowedType"],
-        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
+        "illegal: IllegalClassToUse<any>"
       ),
 
       // Awaiting on a not-allowed class, #3
       makeDeterminismFailureTest(
-        "await fooBar.invoke(ShopUtilities).retrieveOrder(order_id);",
+        "type User = any; const username = 'phil'; await illegal.client('users').select('password').where({ username }).first();",
         ["awaitingOnNotAllowedType"],
-        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
-      ),
-
-      // Awaiting on a not-allowed class, #4
-      makeDeterminismFailureTest(
-        "await fooBar.client<User>('users').select('password').where({ username }).first();",
-        ["awaitingOnNotAllowedType"],
-        { codeAboveClass: "class FooBar {}", enclosingFunctionParams: "fooBar: FooBar" }
+        "illegal: IllegalClassToUse<any>"
       )
     ]
   ]

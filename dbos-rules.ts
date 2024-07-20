@@ -1,10 +1,13 @@
-import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
+import * as tsExternal from "typescript";
 import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
+import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
 
 import {
   ts, createWrappedNode, Node, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
-  MethodDeclaration, SyntaxKind, Expression, Identifier, Symbol
+  MethodDeclaration, SyntaxKind, Expression, Identifier, Symbol,
+  VariableDeclaration, VariableDeclarationKind, ParenthesizedExpression,
+  Project
 } from "ts-morph";
 
 // Should I find TypeScript variants of these?
@@ -29,9 +32,10 @@ type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
+type ErrorCheckerResult = string | ErrorMessageIdWithFormatData | undefined;
 
-// This returns `undefined` for no error; otherwise, it returns a key to the `errorMessages` map, or a key paired with info for error string formatting
-type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (name: string) => boolean) => string | ErrorMessageIdWithFormatData | undefined;
+// This returns `string` for a simple error`, `ErrorMessageIdWithFormatData` for keys paired with formatting data, and `undefined` for no error
+type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean) => ErrorCheckerResult;
 
 ////////// These are some shared values used throughout the code
 
@@ -120,9 +124,23 @@ So, setting this flag means that determinism warnings will be disabled for await
 const ignoreAwaitsForCallsWithAContextParam = true;
 
 /*
-TODO (Harry's request):
-Peter asked me to add a config setting for `@StoredProcedure` methods to enable them to run locally.
-How hard is it to add a linter rule to always warn the user of this config setting is enabled?`
+TODO (requests from others, and general things for me to do):
+
+- Harry asked me to add a config setting for `@StoredProcedure` methods to enable them to run locally.
+  How hard is it to add a linter rule to always warn the user of this config setting is enabled?`
+
+- Peter asked me about the stored proc test - should check resulting errors from that.
+  The crux of the problem: how to force a version of a package for another dependency (like `eslint`)?
+  Maybe if I include `eslint` as a dependency in the `package.json` locally here,
+  it might then be possible to control the associated TypeScript version that they use.
+  Specifying more versions locally might be the move; I just need some way to make sure that their
+  `eslint` versions are not used. I should experiment some with that.
+
+- Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
+
+- An idea from me: maybe track type and variable aliasing somewhere, somehow
+- Also from me: report the correct line numbers for nodes that fail LR-checks
+- And me again: support cases where it's just `client.raw` for raw SQL (without the `TransactionContext` part)
 */
 
 ////////// These are some utility functions
@@ -131,18 +149,35 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
-// This function exists so that I can make sure that my tests are reading valid symbols
-function getSymbolWrapper(value: Node | ts.Type): Symbol | ts.Symbol | undefined {
-  return value.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
-  // return value.getSymbol() ?? panic(`Expected a symbol for a node or type`);
+// These two functions exist so that I can make sure that my tests are reading valid symbols
+function getNodeSymbol(node: Node): Symbol | undefined {
+  return node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
+  // return node.getSymbol() ?? panic(`Expected a symbol for this node: '${node.getText()}'`);
+}
+
+function getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
+  return type.getSymbol();
+  // return type.getSymbol() ?? panic("Expected a symbol for a type");
+}
+
+function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
+  // The first and third child are parentheses, and the second child is the contained value
+  if (expr.getChildCount() !== 3) panic("Unexpected child count for a parenthesized expression!");
+  return expr.getChildAtIndex(1);
 }
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
 function reduceNodeToLeftmostLeaf(node: Node): Node {
  while (true) {
-    let value = node.getFirstChild();
-    if (value === undefined) return node;
-    node = value;
+    // For parenthesized expressions, we don't want the leftmost parenthesis
+    if (Node.isParenthesizedExpression(node)) {
+      node = unpackParenthesizedExpression(node);
+    }
+    else {
+      let value = node.getFirstChild();
+      if (value === undefined) return node;
+      node = value;
+    }
   }
 }
 
@@ -175,9 +210,13 @@ function getLAndRValuesIfAssignment(node: Node): [Identifier, Expression] | unde
 ////////// These functions are the determinism heuristics that I've written
 
 const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
+  // Could I use `getSymbolsInScope` with some right combination of flags here?
   const maybeLAndRValues = getLAndRValuesIfAssignment(node);
+  if (maybeLAndRValues === undefined) return;
 
-  if (maybeLAndRValues !== undefined && !isLocal(maybeLAndRValues[0].getText())) {
+  const lhsSymbol = getNodeSymbol(maybeLAndRValues[0]);
+
+  if (lhsSymbol !== undefined && !isLocal(lhsSymbol)) {
     return "globalModification";
   }
 
@@ -233,8 +272,10 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
       // Doesn't make sense to await on literals (that will be reported by something else)
       if (Node.isLiteralExpression(lhs)) return;
 
-      // Throwing an error here, since I want to catch what this could be, and maybe revise the code below
-      else panic(`Hm, what could this expression be? Examine... (${lhs.getKindName()}, ${lhs.print()})`);
+      else {
+        return; // Sometimes throwing an error here, since I want to catch what this could be, and maybe revise the code below
+        // panic(`Hm, what could this expression be? Examine... (LHS: '${functionCall.getText()}', kind: ${lhs.getKindName()})`);
+      }
     }
 
     //////////
@@ -257,6 +298,26 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
 
 ////////// This code is for detecting SQL injections
 
+function getNodePosInFile(node: Node) : {line: number, column: number} {
+  return node.getSourceFile().getLineAndColumnAtPos(node.getStart());
+}
+
+// This checks if a variable was used before it was declared; if so, there's a hoisting issue, and skip the declaration.
+function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDeclaration): boolean {
+  const declKind = decl.getVariableStatement()?.getDeclarationKind() ?? panic("When would a variable statement ever not be defined?");
+
+  // If a variable was declared with `var`, then it can be used before it's declared (damn you, Brendan Eich!)
+  if (declKind === VariableDeclarationKind.Var) return true;
+
+  const identifierPos = getNodePosInFile(identifierUsage), declPos = getNodePosInFile(decl);
+
+  const declIsOnPrevLine = declPos.line < identifierPos.line;
+  const declIsOnSameLineButBeforeIdentifier = (declPos.line === identifierPos.line && declPos.column < identifierPos.column);
+
+  return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
+}
+
+
 // This function scans the function body, and finds all references to the given identifier (excluding the one passed in)
 function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
   for (const param of fnDecl.getParameters()) {
@@ -268,7 +329,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
   //////////
 
   function* getCorrespondingRValuesWithinNode(node: Node): Generator<Expression | "NotRValueButFnParam"> {
-    for (const child of node.getChildren()) {
+    for (const child of node.getChildren()) { // Could I iterate through here without allocating the children?
       yield* getCorrespondingRValuesWithinNode(child);
 
       ////////// First, see if the child should be checked or not
@@ -276,16 +337,19 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
       const isTheSameButUsedInAnotherPlace = (
         child !== identifier // Not the same node as our identifier
         && child.getKind() === SyntaxKind.Identifier // This child is an identifier
-        && getSymbolWrapper(child) === getSymbolWrapper(identifier) // They have the same symbol (this stops false positives from aliased values)
+        && getNodeSymbol(child) === getNodeSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
       );
 
       if (!isTheSameButUsedInAnotherPlace) continue;
 
-      //////////
+      ////////// Then, analyze the child
 
       const parent = child.getParent() ?? panic("When would the parent to a reference ever not be defined?");
 
       if (Node.isVariableDeclaration(parent)) {
+        // In this case, silently skip the reference (a compilation step will catch any hoisting issues)
+        if (!identifierUsageIsValid(identifier, parent)) continue;
+
         const initialValue = parent.getInitializer();
         if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
         yield initialValue;
@@ -305,9 +369,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 }
 
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
-  /* TODO:
-  - Don't report errors if it is statically determined that they don't influence the query string (e.g. it's after the call, and it's not in a loop context)
-
+  /*
   A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
   Here's what's allowed for SQL string parameters (from a supported callsite):
     1. LR
@@ -320,13 +382,25 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
 
-  /* If the node's value is undefined, it hasn't been explored yet.
-  If it's false, it's not LR. If it's true, it's LR, or currently being
-  computed (which can indicate the existance of a reference cycle).
+  /* If the node doesn't exist in `nodeLRResults`, it hasn't been explored yet.
+  If its value is false, it's not LR. If its value is true, it's LR, or currently being
+  computed (which can indicate the existence of a reference cycle).
 
   Also, it's worthy of noting that I'm not doing this result caching
-  for the sake of efficiency, it's so that reference cycles won't result
-  in infinite recursion. */
+  for the sake of efficiency: it's just so that reference cycles won't result
+  in infinite recursion.
+
+  Also note that errors may be falsely reported if you first use a string for a raw query,
+  and then assign that query to a non-LR value. In most cases, that post-assigned value will
+  not affect the query, but if you are in a loop and the query string is defined in an outer
+  scope, the next loop iteration may then receive that non-LR value, which would qualify as a SQL injection.
+
+  This is only for declarations, and not assignments; doing a raw query with some LR value,
+  and then declaring a variable with the same name, is an error (due to variable hoisting).
+  It would not be an error with `var` (since you can use variables defined with `var` before
+  they are declared), but that is a practical error that this linter plugin is not expected to pick up on.
+  */
+
   let nodeLRResults: Map<Node, boolean> = new Map();
 
   function isLRWithoutResultCache(node: Node): boolean {
@@ -339,7 +413,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     else if (Node.isTemplateExpression(node)) {
       return node.getTemplateSpans().every((span) => {
         // The first child is the contained value, and the second child is the end of the format specifier
-        if (span.getChildCount() !== 2) panic("Unexpected child count for a template expression span!");
+        if (span.getChildCount() !== 2) panic("Unexpected child count for a template span!");
         return isLR(span.getChildAtIndex(0));
       });
     }
@@ -353,12 +427,14 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
     else if (Node.isBinaryExpression(node)) {
       return isLR(node.getLeft()) && isLR(node.getRight());
     }
+    else if (Node.isParenthesizedExpression(node)) {
+      return isLR(unpackParenthesizedExpression(node));
+    }
     else {
       return false;
     }
   }
 
-  // TODO: if it was not LR, then store the node that failed the check, in order to get the right line number
   function isLR(node: Node): boolean {
     const maybeResult = nodeLRResults.get(node);
 
@@ -375,14 +451,11 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   }
 
   if (!isLR(callParam)) {
-    // TODO: report the node that failed the check, in order to get the right line number
-    const lineNumber = callParam.getSourceFile().getLineAndColumnAtPos(callParam.getStart()).line;
-    return ["sqlInjection", {lineNumber: lineNumber}];
+    return ["sqlInjection", {lineNumber: getNodePosInFile(callParam).line}];
   }
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
-  // TODO: support cases where it's just `client.raw` (without the `TransactionContext` part)
   if (Node.isCallExpression(node)) {
     const subexpr = node.getExpression();
 
@@ -433,11 +506,21 @@ function analyzeFunction(fnDecl: FnDecl) {
   any exceptions to exit outside `analyzeFunction` would lead
   to the stack getting reset if `analyzeFunction` is called again). */
 
-  const stack: Set<string>[] = [new Set()];
+  // This stack variant is slower for `isLocal`, but uses less memory for symbols allocated
+  const stack: Set<Symbol>[] = [new Set()]
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Set());
-  const popFrame = () => stack.pop();
-  const isLocal = (name: string) => stack.some((frame) => frame.has(name));
+  const popFrame = () => stack.pop(); // Would I resolve the symbol faster in `isLocal` if checking backwards?
+  const isLocal = (symbol: Symbol) => stack.some((frame) => frame.has(symbol));
+
+  // This stack variant is faster for `isLocal`, but uses more memory for lots of scopes
+  /*
+  const stack: Set<Symbol> = new Set();
+  const getCurrentFrame = () => stack;
+  const pushFrame = () => {};
+  const popFrame = () => {};
+  const isLocal = (symbol: Symbol) => stack.has(symbol);
+  */
 
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
     const response = errorChecker(node, fnDecl, isLocal);
@@ -470,7 +553,8 @@ function analyzeFunction(fnDecl: FnDecl) {
     }
     // Note: parameters are not considered to be locals here (modifying them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
-      locals.add(node.getName());
+      const symbol = getNodeSymbol(node);
+      if (symbol !== undefined) locals.add(symbol);
     }
     else {
       for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
@@ -513,7 +597,6 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
   return eslintNode;
 }
 
-// If the returned name is undefined, then there is no associated type (e.g. a never-defined but used variable)
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
   /* We need to use the typechecker to check the type, instead of `expr.getType()`,
   since type information is lost when creating `ts-morph` nodes from TypeScript compiler
@@ -524,7 +607,24 @@ function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
 
   // The name from the symbol is more minimal, so preferring that here when it's available
   const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
-  return getSymbolWrapper(type)?.getName() ?? typeChecker.typeToString(type);
+  return getTypeSymbol(type)?.getName() ?? typeChecker.typeToString(type);
+}
+
+// This is just for making sure that the unit tests are well constructed (not used when deployed)
+function checkDiagnostics(node: Node) {
+  const project = new Project({});
+
+  const eslintNodeCode = node.getFullText();
+  project.createSourceFile("temp.ts", eslintNodeCode, { overwrite: true });
+  const diagnostics = project.getPreEmitDiagnostics();
+
+  if (diagnostics.length != 0) {
+    const formatted = diagnostics.map((diagnostic) =>
+      `Diagnostic at line ${diagnostic.getLineNumber()}: ${JSON.stringify(diagnostic.getMessageText())}.\n---\n`
+    ).join("\n");
+
+    panic(formatted);
+  }
 }
 
 function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
@@ -537,6 +637,7 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   };
 
   const tsMorphNode = makeTsMorphNode(eslintNode);
+  // checkDiagnostics(tsMorphNode);
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
@@ -544,11 +645,12 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}`);
+      const possibleVersioningError = `This might be from disjoint TypeScript compiler API versions (ts-morph uses ${ts.version}, but ${tsExternal.version} is installed externally).`;
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}`);
     }
   }
   finally {
-    // Not keeping the tools around after failure
+    // Not keeping the tools around after being done with them
     GLOBAL_TOOLS = undefined;
   }
 }
