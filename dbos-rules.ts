@@ -129,13 +129,6 @@ TODO (requests from others, and general things for me to do):
 - Harry asked me to add a config setting for `@StoredProcedure` methods to enable them to run locally.
   How hard is it to add a linter rule to always warn the user of this config setting is enabled?`
 
-- Peter asked me about the stored proc test - should check resulting errors from that.
-  The crux of the problem: how to force a version of a package for another dependency (like `eslint`)?
-  Maybe if I include `eslint` as a dependency in the `package.json` locally here,
-  it might then be possible to control the associated TypeScript version that they use.
-  Specifying more versions locally might be the move; I just need some way to make sure that their
-  `eslint` versions are not used. I should experiment some with that.
-
 - Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
 
 - An idea from me: maybe track type and variable aliasing somewhere, somehow
@@ -645,8 +638,12 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const possibleVersioningError = `This might be from disjoint TypeScript compiler API versions (ts-morph uses ${ts.version}, but ${tsExternal.version} is installed externally).`;
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}`);
+      const possibleVersioningError = `\
+This might be from disjoint TypeScript compiler API versions (ts-morph uses ${ts.version}, but ${tsExternal.version} is installed externally).
+If the versions are the same, check the version that typescript-eslint is using. A likely fix would be to match your local
+TypeScript version with one of these, as an exact version (no ^ or ~ prefixes)`;
+
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}\n`);
     }
   }
   finally {
@@ -714,7 +711,7 @@ const recConfig = {
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
-    version: "1.2.0"
+    version: "2.0.0"
   },
 
   rules: {
