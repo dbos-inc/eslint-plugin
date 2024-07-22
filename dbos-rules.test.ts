@@ -117,14 +117,13 @@ function makeSqlInjectionSuccessTest(code: string): SuccessTest {
 }
 
 function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
-  return {
-      code: makeSqlInjectionCode(code),
-      errors: errorIdsToObjectFormat(expectedErrorIds)
-    };
+  return { code: makeSqlInjectionCode(code), errors: errorIdsToObjectFormat(expectedErrorIds) };
 }
 
 //////////
 
+/* TODO: perhaps make some test helper functions to make that better, or split tests into more files
+(core goal: isolate what each test tests for), and that might also make them somewhat easier to read */
 const testSet: TestSet = [
   /* Note: the tests for SQL injection do not
   involve any actual SQL code; they just test
@@ -223,9 +222,14 @@ const testSet: TestSet = [
       makeSqlInjectionSuccessTest(`
         let foo = 'x';
         ctxt.client.raw(\`\${'305' + '2' + \`\${foo}\`} \${'abc' + 'def'} \${'512'} \${'603'} \${'712'} \${foo + foo + 'foo'}\`);
+      `),
+
+      // Success test #8 (testing reassigning the client in a different format)
+      makeSqlInjectionSuccessTest(`
+        const client = ctxt.client;
+        client.raw("foo");
       `)
     ],
-
     [
       // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
@@ -292,6 +296,14 @@ const testSet: TestSet = [
         ctxt.client.raw(s);
         `,
         Array(1).fill("sqlInjection")
+      ),
+
+      // Failure test #5 (testing reassigning the client in a different format)
+      makeSqlInjectionFailureTest(`
+        const client = ctxt.client;
+        client.raw((5).toString());
+        `,
+        Array(1).fill("sqlInjection")
       )
     ]
   ],
@@ -353,7 +365,7 @@ const testSet: TestSet = [
           }
         }
       }`,
-      Array(12).fill("globalModification")
+      Array(12).fill("globalMutation")
     )]
   ],
 
@@ -363,6 +375,7 @@ const testSet: TestSet = [
       IDs (which line up with the banned functions tested) */
       makeDeterminismFailureTest("Date();", ["Date"]),
       makeDeterminismFailureTest("new Date();", ["Date"]),
+      makeDeterminismFailureTest("Date.now();", ["Date.now"]),
       makeDeterminismFailureTest("Math.random();", ["Math.random"]),
       makeDeterminismFailureTest("console.log(\"Hello!\");", ["console.log"]),
       makeDeterminismFailureTest("setTimeout(() => {});", ["setTimeout"]),
@@ -374,7 +387,7 @@ const testSet: TestSet = [
   ["allowed/not allowed awaits",
     [
       // makeDeterminismSuccessTest("await ({}).foo();"), // TODO: probably make this fail in a proper way
-      makeDeterminismSuccessTest("await new Set();"), // TODO: definitely make this not allowed
+      makeDeterminismSuccessTest("await new Set();"), // TODO: definitely make this not allowed (so ignore the `new`)
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #1
       makeDeterminismSuccessTest("await ctxt.foo();", "ctxt: WorkflowContext"),

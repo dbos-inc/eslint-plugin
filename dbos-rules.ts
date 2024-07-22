@@ -43,7 +43,14 @@ let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
 
 const errorMessages = makeErrorMessageSet();
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
-const validOrmClientNames = new Set(["PoolClient", "PrismaClient", "TypeORMEntityManager", "Knex"]);
+
+// This maps the ORM client name to the the raw SQL query call and the index of the raw query parameter
+const ormClientInfoForRawSqlQueries: Map<string, [string, number]> = new Map([
+  ["PoolClient", ["TODO", 9999]],
+  ["PrismaClient", ["TODO", 9999]],
+  ["TypeORMEntityManager", ["TODO", 9999]],
+  ["Knex", ["raw", 0]]
+]);
 
 const assignmentTokenKinds = new Set([
   SyntaxKind.EqualsToken,
@@ -91,7 +98,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   // The keys are the ids, and the values are the messages themselves
   return new Map([ // TODO: vary the error type ("involved nonliteral string concatenation", or "was a nonliteral parameter")
     ["sqlInjection", "Possible SQL injection detected (The expression on line {{ lineNumber }} involved a value that was not composed of literal string components)! Use prepared statements instead"],
-    ["globalModification", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
+    ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
     ["Date.now", makeDateMessage("`Date.now()`")],
@@ -131,9 +138,10 @@ TODO (requests from others, and general things for me to do):
 
 - Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
 
-- An idea from me: maybe track type and variable aliasing somewhere, somehow
-- Also from me: report the correct line numbers for nodes that fail LR-checks
-- And me again: support cases where it's just `client.raw` for raw SQL (without the `TransactionContext` part)
+From me:
+- Maybe track type and variable aliasing somewhere, somehow
+- Report the correct line numbers for nodes that fail LR-checks
+- More callsite support
 */
 
 ////////// These are some utility functions
@@ -210,7 +218,7 @@ const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
   const lhsSymbol = getNodeSymbol(maybeLAndRValues[0]);
 
   if (lhsSymbol !== undefined && !isLocal(lhsSymbol)) {
-    return "globalModification";
+    return "globalMutation";
   }
 
   /*
@@ -448,42 +456,53 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   }
 }
 
+// If it's a raw SQL injection callsite, then this returns a client name, a raw query function, and a SQL string argument
+function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Node | undefined {
+  const callExprWithoutParams = callExpr.getExpression();
+
+  // `client.<callName>`, or `ctxt.client.<callName>`
+  const identifiers = callExprWithoutParams.getDescendantsOfKind(SyntaxKind.Identifier);
+  if (identifiers.length !== 2 && identifiers.length !== 3) return;
+
+  const identifierTypeNames = identifiers.map(getTypeNameForTsMorphNode);
+
+  if (identifiers.length === 3) {
+    // If it's the 3-identifier variant, check that it's from a `TransactionContext`
+    if (identifierTypeNames[0] !== "TransactionContext") return;
+
+    // Removing the context from the front
+    identifiers.shift();
+    identifierTypeNames.shift();
+  }
+
+  //////////
+
+  const maybeInfo = ormClientInfoForRawSqlQueries.get(identifierTypeNames[0]);
+
+  if (maybeInfo !== undefined) {
+    const [callSite, rawQueryIndex] = maybeInfo;
+    const callArgs = callExpr.getArguments();
+
+    if (callSite === identifiers[1].getText() && rawQueryIndex < callArgs.length) {
+      return callArgs[rawQueryIndex];
+    }
+  }
+}
+
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
-    const subexpr = node.getExpression();
-
-    // `ctxt.client.<callName>`
-    const identifiers = subexpr.getDescendantsOfKind(SyntaxKind.Identifier);
-
-    // An injection in DBOS must match `ctxt.client.<something>`
-    if (identifiers.length !== 3) return;
-
-    const callArgs = node.getArguments();
-    const identifierTypeNames = identifiers.map(getTypeNameForTsMorphNode);
-
-    const maybeOrmClientName = identifierTypeNames[1];
-
-    // In this case, not a valid DBOS SQL query
-    if (identifierTypeNames[0] !== "TransactionContext" || !validOrmClientNames.has(maybeOrmClientName)) {
-      return;
-    }
-
-    if (maybeOrmClientName === "Knex" && identifiers[2].getText() === "raw") {
-      return checkCallForInjection(callArgs[0], fnDecl);
-    }
-    else {
-      // panic(`${maybeOrmClientName} not implemented yet (identifiers: ${identifiers.map((id) => id.getText()).join(", ")})`);
-    }
+    const maybeRawSqlString = maybeGetRawSqlStringFromRawCallSite(node);
+    if (maybeRawSqlString !== undefined) return checkCallForInjection(maybeRawSqlString, fnDecl);
   }
 }
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
 // Note: a workflow can never be a transaction, so no need to worry about overlap here
-const decoratorSetErrorCheckerMapping: Map<Set<string>, ErrorChecker[]> = new Map([
+const decoratorSetErrorCheckerMapping: [Set<string>, ErrorChecker[]][] = [
   [new Set(["Transaction"]), [isSqlInjection]], // Checking for SQL injection here
   [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]] // Checking for nondeterminism here
-]);
+];
 
 function analyzeFunction(fnDecl: FnDecl) {
   // A function declaration without a body: `declare function myFunction();`
@@ -544,7 +563,7 @@ function analyzeFunction(fnDecl: FnDecl) {
       popFrame();
       return;
     }
-    // Note: parameters are not considered to be locals here (modifying them is not allowed, currently!)
+    // Note: parameters are not considered to be locals here (mutating them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
       const symbol = getNodeSymbol(node);
       if (symbol !== undefined) locals.add(symbol);
@@ -659,7 +678,7 @@ isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignm
 - Check function expressions and arrow functions for mutation (and interfaces?)
 - Check for recursive global mutation for expected-to-be-deterministic functions
 - Check for classes when assigned to a variable (like `const Foo = class ...`), and then scanning those
-- Modification of outer class variables (so a class in another one, modifying some other `OuterClass.field`)
+- Mutation of outer class variables (so a class in another one, modifying some other `OuterClass.field`)
 */
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is the ESLint plugin code (mostly boilerplate):
