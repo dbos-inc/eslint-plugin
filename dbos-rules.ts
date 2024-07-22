@@ -14,9 +14,6 @@ import {
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
-type EslintNode = TSESTree.Node;
-type EslintContext = TSESLint.RuleContext<string, unknown[]>;
-
 /*
 Note for upgrading `ts-morph` and `typescript` in `package.json`:
 1. Make sure that the supported TypeScript version for `ts-morph` is the one installed here.
@@ -27,19 +24,25 @@ Note for upgrading `ts-morph` and `typescript` in `package.json`:
 
 ////////// These are some shared types
 
+const Nothing = undefined;
+type Maybe<T> = NonNullable<T> | typeof Nothing;
+
+type EslintNode = TSESTree.Node;
+type EslintContext = TSESLint.RuleContext<string, unknown[]>;
+
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
 type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
-type ErrorCheckerResult = string | ErrorMessageIdWithFormatData | undefined;
+type ErrorCheckerResult = Maybe<string | ErrorMessageIdWithFormatData>;
 
-// This returns `string` for a simple error`, `ErrorMessageIdWithFormatData` for keys paired with formatting data, and `undefined` for no error
+// This returns `string` for a simple error`, `ErrorMessageIdWithFormatData` for keys paired with formatting data, and `Nothing` for no error
 type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean) => ErrorCheckerResult;
 
 ////////// These are some shared values used throughout the code
 
-let GLOBAL_TOOLS: GlobalTools | undefined = undefined;
+let GLOBAL_TOOLS: Maybe<GlobalTools> = Nothing;
 
 const errorMessages = makeErrorMessageSet();
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
@@ -151,12 +154,12 @@ function panic(message: string): never {
 }
 
 // These two functions exist so that I can make sure that my tests are reading valid symbols
-function getNodeSymbol(node: Node): Symbol | undefined {
+function getNodeSymbol(node: Node): Maybe<Symbol> {
   return node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
   // return node.getSymbol() ?? panic(`Expected a symbol for this node: '${node.getText()}'`);
 }
 
-function getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
+function getTypeSymbol(type: ts.Type): Maybe<ts.Symbol> {
   return type.getSymbol();
   // return type.getSymbol() ?? panic("Expected a symbol for a type");
 }
@@ -176,7 +179,7 @@ function reduceNodeToLeftmostLeaf(node: Node): Node {
     }
     else {
       let value = node.getFirstChild();
-      if (value === undefined) return node;
+      if (value === Nothing) return node;
       node = value;
     }
   }
@@ -195,7 +198,7 @@ function functionHasDecoratorInSet(fnDecl: FnDecl, decoratorSet: Set<string>): b
 
 /* This returns the lvalue and rvalue for an assignment,
 if the node is an assignment expression and the lvalue is an identifier */
-function getLAndRValuesIfAssignment(node: Node): [Identifier, Expression] | undefined {
+function getLAndRValuesIfAssignment(node: Node): Maybe<[Identifier, Expression]> {
   if (Node.isBinaryExpression(node)) {
     const operatorKind = node.getOperatorToken().getKind();
 
@@ -213,11 +216,11 @@ function getLAndRValuesIfAssignment(node: Node): [Identifier, Expression] | unde
 const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
   // Could I use `getSymbolsInScope` with some right combination of flags here?
   const maybeLAndRValues = getLAndRValuesIfAssignment(node);
-  if (maybeLAndRValues === undefined) return;
+  if (maybeLAndRValues === Nothing) return;
 
   const lhsSymbol = getNodeSymbol(maybeLAndRValues[0]);
 
-  if (lhsSymbol !== undefined && !isLocal(lhsSymbol)) {
+  if (lhsSymbol !== Nothing && !isLocal(lhsSymbol)) {
     return "globalMutation";
   }
 
@@ -242,7 +245,7 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
 
     const argCountRange = bannedFunctionsWithArgCountRanges.get(text);
 
-    if (argCountRange !== undefined) {
+    if (argCountRange !== Nothing) {
       const argCount = node.getArguments().length;
 
       if (argCount >= argCountRange.min && argCount <= argCountRange.max) {
@@ -352,13 +355,13 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
         if (!identifierUsageIsValid(identifier, parent)) continue;
 
         const initialValue = parent.getInitializer();
-        if (initialValue === undefined) continue; // Not initialized yet, so skip this reference
+        if (initialValue === Nothing) continue; // Not initialized yet, so skip this reference
         yield initialValue;
       }
       else {
           const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
 
-          if (maybeLAndRValues !== undefined) {
+          if (maybeLAndRValues !== Nothing) {
             yield maybeLAndRValues[1];
           }
           else if (Node.isParameterDeclaration(parent)) {
@@ -369,7 +372,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
   }
 }
 
-function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdWithFormatData | undefined {
+function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMessageIdWithFormatData> {
   /*
   A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
   Here's what's allowed for SQL string parameters (from a supported callsite):
@@ -439,7 +442,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
   function isLR(node: Node): boolean {
     const maybeResult = nodeLRResults.get(node);
 
-    if (maybeResult !== undefined) {
+    if (maybeResult !== Nothing) {
       return maybeResult;
     }
     else {
@@ -457,7 +460,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): ErrorMessageIdW
 }
 
 // If it's a raw SQL injection callsite, then this returns a client name, a raw query function, and a SQL string argument
-function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Node | undefined {
+function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Maybe<Node> {
   const callExprWithoutParams = callExpr.getExpression();
 
   // `client.<callName>`, or `ctxt.client.<callName>`
@@ -479,7 +482,7 @@ function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Node | u
 
   const maybeInfo = ormClientInfoForRawSqlQueries.get(identifierTypeNames[0]);
 
-  if (maybeInfo !== undefined) {
+  if (maybeInfo !== Nothing) {
     const [callSite, rawQueryIndex] = maybeInfo;
     const callArgs = callExpr.getArguments();
 
@@ -492,7 +495,7 @@ function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Node | u
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
     const maybeRawSqlString = maybeGetRawSqlStringFromRawCallSite(node);
-    if (maybeRawSqlString !== undefined) return checkCallForInjection(maybeRawSqlString, fnDecl);
+    if (maybeRawSqlString !== Nothing) return checkCallForInjection(maybeRawSqlString, fnDecl);
   }
 }
 
@@ -507,7 +510,7 @@ const decoratorSetErrorCheckerMapping: [Set<string>, ErrorChecker[]][] = [
 function analyzeFunction(fnDecl: FnDecl) {
   // A function declaration without a body: `declare function myFunction();`
   const body = fnDecl.getBody();
-  if (body === undefined) return;
+  if (body === Nothing) return;
 
   /* Note that each stack is local to each function,
   so it's reset when a new function is entered
@@ -537,7 +540,7 @@ function analyzeFunction(fnDecl: FnDecl) {
   function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
     const response = errorChecker(node, fnDecl, isLocal);
 
-    if (response !== undefined) {
+    if (response !== Nothing) {
       let [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
       GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
     }
@@ -566,7 +569,7 @@ function analyzeFunction(fnDecl: FnDecl) {
     // Note: parameters are not considered to be locals here (mutating them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
       const symbol = getNodeSymbol(node);
-      if (symbol !== undefined) locals.add(symbol);
+      if (symbol !== Nothing) locals.add(symbol);
     }
     else {
       for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
@@ -667,7 +670,7 @@ TypeScript version with one of these, as an exact version (no ^ or ~ prefixes)`;
   }
   finally {
     // Not keeping the tools around after being done with them
-    GLOBAL_TOOLS = undefined;
+    GLOBAL_TOOLS = Nothing;
   }
 }
 
