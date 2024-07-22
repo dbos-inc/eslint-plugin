@@ -394,7 +394,7 @@ const testSet: TestSet = [
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
       makeDeterminismSuccessTest(
-        "class ShopUtilities {}; const orderId = 20; await ctxt.invoke(ShopUtilities).retrieveOrder(orderId);",
+        "class ShopUtilities {}; const orderId: number = 20; await ctxt.invoke(ShopUtilities).retrieveOrder(orderId);",
         "ctxt: WorkflowContext"
       ),
 
@@ -432,7 +432,7 @@ const testSet: TestSet = [
 
       // Awaiting on a not-allowed class, #2
       makeDeterminismFailureTest(
-        "class ShopUtilities {}; const orderId = 20; await illegal.invoke(ShopUtilities).retrieveOrder(orderId);",
+        "class ShopUtilities {}; const orderId: number = 20; await illegal.invoke(ShopUtilities).retrieveOrder(orderId);",
         ["awaitingOnNotAllowedType"],
         "illegal: IllegalClassToUse<any>"
       ),

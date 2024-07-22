@@ -3,7 +3,7 @@ import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } fr
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
 
 import {
-  ts, createWrappedNode, Node, FunctionDeclaration,
+  ts, createWrappedNode, Node, Type, FunctionDeclaration,
   CallExpression, ConstructorDeclaration, ClassDeclaration,
   MethodDeclaration, SyntaxKind, Expression, Identifier, Symbol,
   VariableDeclaration, VariableDeclarationKind, ParenthesizedExpression,
@@ -133,6 +133,9 @@ probably just does the snippet above, but in an abstracted manner (so `getUser` 
 So, setting this flag means that determinism warnings will be disabled for awaits in this situation. */
 const ignoreAwaitsForCallsWithAContextParam = true;
 
+// This is just for making sure that my tests work as they should
+const testingValidityOfTestsLocally = false;
+
 /*
 TODO (requests from others, and general things for me to do):
 
@@ -142,7 +145,7 @@ TODO (requests from others, and general things for me to do):
 - Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
 
 From me:
-- Maybe track type and variable aliasing somewhere, somehow
+- Maybe track type and variable aliasing somewhere, somehow (if needed)
 - Report the correct line numbers for nodes that fail LR-checks
 - More callsite support
 */
@@ -153,15 +156,11 @@ function panic(message: string): never {
   throw new Error(message);
 }
 
-// These two functions exist so that I can make sure that my tests are reading valid symbols
-function getNodeSymbol(node: Node): Maybe<Symbol> {
-  return node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
-  // return node.getSymbol() ?? panic(`Expected a symbol for this node: '${node.getText()}'`);
-}
-
-function getTypeSymbol(type: ts.Type): Maybe<ts.Symbol> {
-  return type.getSymbol();
-  // return type.getSymbol() ?? panic("Expected a symbol for a type");
+// This function exists so that I can make sure that my tests are reading valid symbols
+function getNodeSymbol(node: Node | Type): Maybe<Symbol> {
+  const symbol = node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
+  if (testingValidityOfTestsLocally && symbol === Nothing) panic(`Expected a symbol for this node: '${node.getText()}'`);
+  return symbol;
 }
 
 function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
@@ -494,7 +493,7 @@ function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Maybe<No
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
-    const maybeRawSqlString = maybeGetRawSqlStringFromRawCallSite(node);
+   const maybeRawSqlString = maybeGetRawSqlStringFromRawCallSite(node);
     if (maybeRawSqlString !== Nothing) return checkCallForInjection(maybeRawSqlString, fnDecl);
   }
 }
@@ -613,16 +612,9 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 }
 
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
-  /* We need to use the typechecker to check the type, instead of `expr.getType()`,
-  since type information is lost when creating `ts-morph` nodes from TypeScript compiler
-  nodes, which in turn come from ESTree nodes (which are the nodes that ESLint uses
-  for its AST). */
-
-  const typeChecker = GLOBAL_TOOLS!.typeChecker;
-
-  // The name from the symbol is more minimal, so preferring that here when it's available
-  const type = typeChecker.getTypeAtLocation(tsMorphNode.compilerNode);
-  return getTypeSymbol(type)?.getName() ?? typeChecker.typeToString(type);
+  // TODO: use the util fn here!
+  const type = tsMorphNode.getType();
+  return getNodeSymbol(type)?.getName() ?? type.getText();
 }
 
 // This is just for making sure that the unit tests are well constructed (not used when deployed)
@@ -652,7 +644,7 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   };
 
   const tsMorphNode = makeTsMorphNode(eslintNode);
-  // checkDiagnostics(tsMorphNode);
+  if (testingValidityOfTestsLocally) checkDiagnostics(tsMorphNode);
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
