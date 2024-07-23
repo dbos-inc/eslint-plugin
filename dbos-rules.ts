@@ -101,7 +101,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
 
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the not-string-literal on line {{ lineNumber }}: '{{ theExpression }}'"],
+    ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'"],
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -408,7 +408,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   const rootProblemNodes: Set<Node> = new Set();
 
   function isLRWithoutResultCache(node: Node): boolean {
-    if (Node.isStringLiteral(node)) {
+    if (Node.isStringLiteral(node) || Node.isNumericLiteral(node)) {
       return true;
     }
     /* i.e. if it's a format string (like `${foo} ${bar} ${baz}`).
