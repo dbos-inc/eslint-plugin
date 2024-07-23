@@ -146,9 +146,9 @@ TODO (requests from others, and general things for me to do):
 - Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
 
 From me:
-- Maybe track type and variable aliasing somewhere, somehow (if needed)
 - More callsite support
 - Run this over `dbos-transact`
+- Maybe track type and variable aliasing somewhere, somehow (if needed)
 */
 
 ////////// These are some utility functions
