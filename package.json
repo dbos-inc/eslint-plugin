@@ -32,7 +32,11 @@
     "@typescript-eslint/utils": "7.14"
   },
   "overrides": {
-    "typescript": "5.4.2"
+    "typescript": "5.4.2",
+    "typescript-eslint": "7.14",
+    "@typescript-eslint/eslint-plugin": "7.14",
+    "@typescript-eslint/parser": "7.14",
+    "@typescript-eslint/utils": "7.14"
   },
   "keywords": [
     "eslint",
