@@ -32,21 +32,17 @@
     "@typescript-eslint/utils": "7.14"
   },
   "overrides": {
-    "typescript": "5.4.2",
-    "typescript-eslint": "7.14",
-    "@typescript-eslint/eslint-plugin": "7.14",
-    "@typescript-eslint/parser": "7.14",
-    "@typescript-eslint/utils": "7.14"
+    "typescript": "5.4.2"
   },
-  "keywords": [
-    "eslint",
-    "eslintplugin"
-  ],
   "devDependencies": {
     "@typescript-eslint/rule-tester": "7.14",
     "vitest": "^1.6.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "4.9.5"
-  }
+  },
+  "keywords": [
+    "eslint",
+    "eslintplugin"
+  ]
 }
