@@ -15,9 +15,11 @@ const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
 /*
-Note for upgrading `ts-morph` and `typescript` in `package.json`:
-1. Make sure that the supported TypeScript version for `ts-morph` is the one installed here.
-2. Make sure that the installed TypeScript version works with `dbos-demo-apps` (TypeScript 5.5 + ts-morph 23.0 caused some breakage there).
+A problem that still remains (which I have not been able to resolve) is in regards to package versioning.
+I need certain package versions (whose versions are very tightly coupled; otherwise stuff will break) in this project's `package.json`.
+When a user of this package installs any of the dependencies here, the DBOS static analysis linter rule ends up using their installed version,
+which massively breaks things in various ways (mostly true to TypeScript compiler API tree structure incompatability). If you are reading this,
+and you know how to solve this, please let me know!
 */
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
