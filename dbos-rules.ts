@@ -100,8 +100,8 @@ Please verify that this call is deterministic or it may lead to non-reproducible
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
   // The keys are the ids, and the values are the messages themselves
-  return new Map([ // TODO: vary the error type ("involved nonliteral string concatenation", or "was a nonliteral parameter")
-    ["sqlInjection", "Possible SQL injection detected (The expression on line {{ lineNumber }} involved a value that was not composed of literal string components)! Use prepared statements instead"],
+  return new Map([
+    ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the not-string-literal on line {{ lineNumber }}: '{{ theExpression }}'"],
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -147,7 +147,6 @@ TODO (requests from others, and general things for me to do):
 
 From me:
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
-- Report the correct line numbers for nodes that fail LR-checks
 - More callsite support
 - Run this over `dbos-transact`
 */
@@ -179,7 +178,7 @@ function reduceNodeToLeftmostLeaf(node: Node): Node {
       node = unpackParenthesizedExpression(node);
     }
     else {
-      let value = node.getFirstChild();
+      const value = node.getFirstChild();
       if (value === Nothing) return node;
       node = value;
     }
@@ -271,7 +270,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
     const functionCall = node.getExpression();
     if (!Node.isCallExpression(functionCall)) return; // Wouldn't make sense otherwise
 
-    let lhs = reduceNodeToLeftmostLeaf(functionCall);
+    const lhs = reduceNodeToLeftmostLeaf(functionCall);
 
     if (!Node.isIdentifier(lhs) && !Node.isThisExpression(lhs)) { // `this` may have a type too
       // Doesn't make sense to await on literals (that will be reported by something else)
@@ -321,7 +320,6 @@ function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDecla
 
   return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
 }
-
 
 // This function scans the function body, and finds all references to the given identifier (excluding the one passed in)
 function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
@@ -406,7 +404,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   they are declared), but that is a practical error that this linter plugin is not expected to pick up on.
   */
 
-  let nodeLRResults: Map<Node, boolean> = new Map();
+  const nodeLRResults: Map<Node, boolean> = new Map();
+  const rootProblemNodes: Set<Node> = new Set();
 
   function isLRWithoutResultCache(node: Node): boolean {
     if (Node.isStringLiteral(node)) {
@@ -423,8 +422,11 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
       });
     }
     else if (Node.isIdentifier(node)) {
-      for (const rvalueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
-        if (rvalueAssigned === "NotRValueButFnParam" || !isLR(rvalueAssigned)) return false;
+      for (const rValueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
+        const isParam = rValueAssigned === "NotRValueButFnParam";
+
+        if (isParam) rootProblemNodes.add(node);
+        if (isParam || !isLR(rValueAssigned)) return false;
       }
 
       return true;
@@ -436,6 +438,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
       return isLR(unpackParenthesizedExpression(node));
     }
     else {
+      rootProblemNodes.add(node);
       return false;
     }
   }
@@ -456,7 +459,13 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   }
 
   if (!isLR(callParam)) {
-    return ["sqlInjection", {lineNumber: getNodePosInFile(callParam).line}];
+    if (rootProblemNodes.size !== 1) panic("There's a strict requirement of 1 root problem node during failure!");
+    let discoveredNode = Array.from(rootProblemNodes)[0];
+
+    return ["sqlInjection", {
+      lineNumber: getNodePosInFile(discoveredNode).line,
+      theExpression: discoveredNode.getText()
+    }];
   }
 }
 
@@ -495,15 +504,12 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     if (maybeArgs !== Nothing) {
-      return checkCallForInjection(maybeArgs[0], fnDecl);
+      // return checkCallForInjection(maybeArgs[0], fnDecl);
 
-      // TODO: check all params later
-      /*
-      for (const arg of maybeArgs) { // TODO: use `some` here somehow
+      for (const arg of maybeArgs) {
         const injectionFailure = checkCallForInjection(arg, fnDecl);
         if (injectionFailure !== Nothing) return injectionFailure;
       }
-      */
     }
   }
 }
@@ -550,7 +556,7 @@ function analyzeFunction(fnDecl: FnDecl) {
     const response = errorChecker(node, fnDecl, isLocal);
 
     if (response !== Nothing) {
-      let [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
+      const [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
       GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
     }
   }

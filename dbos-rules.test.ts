@@ -462,16 +462,4 @@ const testSet: TestSet = [
   ]
 ];
 
-/*
-testSet = [
-  ["minitest", [], [
-
-    makeSqlInjectionFailureTest(`
-      const av = "xyz";
-      ctxt.client.raw(av);
-    `, Array(1).fill("sqlInjection"))
-  ]
-]];
-*/
-
 testSet.forEach((test) => doTest(...test));
