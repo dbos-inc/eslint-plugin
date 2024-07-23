@@ -47,12 +47,13 @@ let GLOBAL_TOOLS: Maybe<GlobalTools> = Nothing;
 const errorMessages = makeErrorMessageSet();
 const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in deterministic functions, to be specific
 
-// This maps the ORM client name to the the raw SQL query call and the index of the raw query parameter
-const ormClientInfoForRawSqlQueries: Map<string, [string, number]> = new Map([
-  ["PoolClient", ["TODO", 9999]],
-  ["PrismaClient", ["TODO", 9999]],
-  ["TypeORMEntityManager", ["TODO", 9999]],
-  ["Knex", ["raw", 0]]
+// This maps the ORM client name to a list of raw SQL query calls to check
+const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
+  ["PoolClient", ["TODO"]],
+  ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
+  ["TypeORMEntityManager", ["TODO"]],
+  ["Knex", ["raw"]]
+  // TODO: also support `UserDatabase` (if applicable)
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -148,6 +149,7 @@ From me:
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
 - Report the correct line numbers for nodes that fail LR-checks
 - More callsite support
+- Run this over `dbos-transact`
 */
 
 ////////// These are some utility functions
@@ -458,8 +460,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   }
 }
 
-// If it's a raw SQL injection callsite, then this returns a client name, a raw query function, and a SQL string argument
-function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Maybe<Node> {
+// If it's a raw SQL injection callsite, then this returns the arguments to examine
+function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]> {
   const callExprWithoutParams = callExpr.getExpression();
 
   // `client.<callName>`, or `ctxt.client.<callName>`
@@ -482,19 +484,26 @@ function maybeGetRawSqlStringFromRawCallSite(callExpr: CallExpression): Maybe<No
   const maybeInfo = ormClientInfoForRawSqlQueries.get(identifierTypeNames[0]);
 
   if (maybeInfo !== Nothing) {
-    const [callSite, rawQueryIndex] = maybeInfo;
     const callArgs = callExpr.getArguments();
 
-    if (callSite === identifiers[1].getText() && rawQueryIndex < callArgs.length) {
-      return callArgs[rawQueryIndex];
+    for (const callSite of maybeInfo) { // TODO: use `any` here somehow
+      if (callSite === identifiers[1].getText()) {
+        return callArgs;
+      }
     }
   }
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
-   const maybeRawSqlString = maybeGetRawSqlStringFromRawCallSite(node);
-    if (maybeRawSqlString !== Nothing) return checkCallForInjection(maybeRawSqlString, fnDecl);
+   const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
+
+    if (maybeArgs !== Nothing) {
+      for (const arg of maybeArgs) { // TODO: use `any` here somehow
+        const injectionFailure = checkCallForInjection(arg, fnDecl);
+        if (injectionFailure !== Nothing) return injectionFailure;
+      }
+    }
   }
 }
 
@@ -612,9 +621,10 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 }
 
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
-  // TODO: use the util fn here!
-  const type = tsMorphNode.getType();
-  return getNodeSymbol(type)?.getName() ?? type.getText();
+  // If it's a literal type, it'll get the base type; otherwise, nothing happens
+  const type = tsMorphNode.getType().getBaseTypeOfLiteralType();
+  const maybeSymbol = getNodeSymbol(type);
+  return maybeSymbol?.getName() ?? type.getText();
 }
 
 // This is just for making sure that the unit tests are well constructed (not used when deployed)

@@ -69,13 +69,17 @@ function makeDeterminismCode(code: string, enclosingFunctionParams: string): str
   `;
 }
 
-function makeSqlInjectionCode(code: string): string {
+function makeSqlInjectionCode(code: string, sqlClient: string): string {
   return `
     class DBOSContext {}
     class UserDatabaseClient {}
 
     class Knex {
-      raw(x: string) {}
+      raw(...x: string) {}
+    }
+
+    class PrismaClient {
+      $queryRawUnsafe(...x: string) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
@@ -88,7 +92,7 @@ function makeSqlInjectionCode(code: string): string {
 
     class SqlInjectionTestClass {
       @Transaction()
-      injectionTestMethod(ctxt: TransactionContext<Knex>, aParam: string) {
+      injectionTestMethod(ctxt: TransactionContext<${sqlClient}>, aParam: string) {
         ${code}
       }
     }
@@ -112,12 +116,12 @@ function makeDeterminismFailureTest(code: string,
     };
 }
 
-function makeSqlInjectionSuccessTest(code: string): SuccessTest {
-  return { code: makeSqlInjectionCode(code) };
+function makeSqlInjectionSuccessTest(code: string, sqlClient: string = "Knex"): SuccessTest {
+  return { code: makeSqlInjectionCode(code, sqlClient) };
 }
 
-function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[]): FailureTest {
-  return { code: makeSqlInjectionCode(code), errors: errorIdsToObjectFormat(expectedErrorIds) };
+function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[], sqlClient: string = "Knex"): FailureTest {
+  return { code: makeSqlInjectionCode(code, sqlClient), errors: errorIdsToObjectFormat(expectedErrorIds) };
 }
 
 //////////
@@ -304,6 +308,17 @@ const testSet: TestSet = [
         client.raw((5).toString());
         `,
         Array(1).fill("sqlInjection")
+      ),
+
+      // Failure test #6 (testing `PrismaClient`)
+      makeSqlInjectionFailureTest(`
+        ctxt.client.$queryRawUnsafe((5).toString()); // Fail
+        ctxt.client.$queryRawUnsafe("literal"); // No fail
+        ctxt.client.$executeRawUnsafe((5).toString()); // Fail
+        ctxt.client.$executeRawUnsafe("the-literal", 5); // Fail
+        `,
+        Array(3).fill("sqlInjection"),
+        "PrismaClient"
       )
     ]
   ],
@@ -446,5 +461,17 @@ const testSet: TestSet = [
     ]
   ]
 ];
+
+/*
+testSet = [
+  ["minitest", [], [
+
+    makeSqlInjectionFailureTest(`
+      const av = "xyz";
+      ctxt.client.raw(av);
+    `, Array(1).fill("sqlInjection"))
+  ]
+]];
+*/
 
 testSet.forEach((test) => doTest(...test));
