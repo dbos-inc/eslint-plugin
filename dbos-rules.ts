@@ -49,11 +49,12 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 
 // This maps the ORM client name to a list of raw SQL query calls to check
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
-  ["PoolClient", ["query"]], // TODO: support `queryWithClient`
+  // TODO: support `queryWithClient` later for `PoolClient` and `UserDatabase`
+  ["PoolClient", ["query"]],
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
   ["TypeORMEntityManager", ["query"]],
   ["Knex", ["raw"]],
-  ["UserDatabase", ["query"]] // TODO: support `queryWithClient`
+  ["UserDatabase", ["query"]]
 ]);
 
 const assignmentTokenKinds = new Set([
