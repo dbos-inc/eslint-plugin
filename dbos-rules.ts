@@ -340,7 +340,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 
       const isTheSameButUsedInAnotherPlace = (
         child !== identifier // Not the same node as our identifier
-        && child.getKind() === SyntaxKind.Identifier // This child is an identifier
+        && Node.isIdentifier(child) // This child is an identifier
         && getNodeSymbol(child) === getNodeSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
       );
 
