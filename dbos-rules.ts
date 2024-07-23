@@ -495,10 +495,15 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     if (maybeArgs !== Nothing) {
+      return checkCallForInjection(maybeArgs[0], fnDecl);
+
+      // TODO: check all params later
+      /*
       for (const arg of maybeArgs) { // TODO: use `some` here somehow
         const injectionFailure = checkCallForInjection(arg, fnDecl);
         if (injectionFailure !== Nothing) return injectionFailure;
       }
+      */
     }
   }
 }
