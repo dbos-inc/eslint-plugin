@@ -502,11 +502,9 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
     const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
-    if (maybeArgs !== Nothing) {
-      for (const arg of maybeArgs) {
-        const injectionFailure = checkCallForInjection(arg, fnDecl);
-        if (injectionFailure !== Nothing) return injectionFailure;
-      }
+    // Just checking the first argument
+    if (maybeArgs !== Nothing && maybeArgs.length !== 0) {
+      return checkCallForInjection(maybeArgs[0], fnDecl);
     }
   }
 }
