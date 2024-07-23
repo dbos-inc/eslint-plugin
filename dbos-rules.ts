@@ -356,6 +356,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 
         const initialValue = parent.getInitializer();
         if (initialValue === Nothing) continue; // Not initialized yet, so skip this reference
+
         yield initialValue;
       }
       else {
