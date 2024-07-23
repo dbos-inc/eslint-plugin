@@ -1,6 +1,6 @@
 import * as vitest from "vitest";
 import { RuleTester } from "@typescript-eslint/rule-tester";
-import { dbosRulesPerName } from "./dbos-rules";
+import { dbosStaticAnalysisRule } from "./dbos-rules";
 
 RuleTester.it = vitest.it;
 RuleTester.itOnly = vitest.it.only;
@@ -24,8 +24,7 @@ type SuccessTest = ArrayElementType<SuccessTests>;
 type FailureTest = ArrayElementType<FailureTests>;
 
 function doTest(title: string, successTests: SuccessTests, failureTests: FailureTests) {
-  const ruleName = "dbos-static-analysis";
-  tester.run(title, dbosRulesPerName[ruleName], { valid: successTests, invalid: failureTests });
+  tester.run(title, dbosStaticAnalysisRule, { valid: successTests, invalid: failureTests });
 }
 
 //////////

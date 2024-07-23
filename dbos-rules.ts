@@ -746,32 +746,39 @@ const recConfig = {
   }
 };
 
+const createRule = ESLintUtils.RuleCreator((_) => "https://docs.dbos.dev/api-reference/static-analysis");
+
+export const dbosStaticAnalysisRule = createRule({
+  create: (context: EslintContext) => {
+    return {
+      /* Note: I am working with ts-morph because it has
+      stronger typing, and it's easier to work with the AST
+      than ESTree's limited tree navigation. */
+      Program(node: EslintNode) {
+        analyzeRootNode(node, context);
+      }
+    }
+  },
+
+  name: 'dbos-static-analysis',
+
+  meta: {
+    schema: [],
+    type: "suggestion",
+    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
+    messages: Object.fromEntries(errorMessages)
+  },
+
+  defaultOptions: []
+});
+
 module.exports = {
   meta: {
     name: "@dbos-inc/eslint-plugin",
     version: "2.0.0"
   },
 
-  rules: {
-    "dbos-static-analysis": {
-      meta: {
-        type: "suggestion",
-        docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
-        messages: Object.fromEntries(errorMessages)
-      },
-
-      create: (context: EslintContext) => {
-        return {
-          /* Note: I am working with ts-morph because it has
-          stronger typing, and it's easier to work with the AST
-          than ESTree's limited tree navigation. */
-          Program(node: EslintNode) {
-            analyzeRootNode(node, context);
-          }
-        }
-      }
-    }
-  },
+  rules: {'dbos-static-analysis': dbosStaticAnalysisRule},
 
   plugins: {
     "@typescript-eslint": tslintPlugin,
@@ -785,5 +792,3 @@ module.exports = {
     dbosExtendedConfig: recConfig // This is deprecated!
   }
 };
-
-export const dbosRulesPerName: any = module.exports.rules;
