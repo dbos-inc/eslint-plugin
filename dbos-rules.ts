@@ -159,9 +159,14 @@ function panic(message: string): never {
 }
 
 // This function exists so that I can make sure that my tests are reading valid symbols
-function getNodeSymbol(node: Node | Type): Maybe<Symbol> {
+function getSymbol(node: Node | Type): Maybe<Symbol> {
   const symbol = node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
-  if (testingValidityOfTestsLocally && symbol === Nothing) panic(`Expected a symbol for this node: '${node.getText()}'`);
+
+  if (testingValidityOfTestsLocally && symbol === Nothing) {
+    const name = node instanceof Type ? "type" : "node";
+    panic(`Expected a symbol for this ${name}: '${node.getText()}'`);
+  }
+
   return symbol;
 }
 
@@ -219,7 +224,7 @@ const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
   const maybeLAndRValues = getLAndRValuesIfAssignment(node);
   if (maybeLAndRValues === Nothing) return;
 
-  const lhsSymbol = getNodeSymbol(maybeLAndRValues[0]);
+  const lhsSymbol = getSymbol(maybeLAndRValues[0]);
 
   if (lhsSymbol !== Nothing && !isLocal(lhsSymbol)) {
     return "globalMutation";
@@ -341,7 +346,7 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
       const isTheSameButUsedInAnotherPlace = (
         child !== identifier // Not the same node as our identifier
         && Node.isIdentifier(child) // This child is an identifier
-        && getNodeSymbol(child) === getNodeSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
+        && getSymbol(child) === getSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
       );
 
       if (!isTheSameButUsedInAnotherPlace) continue;
@@ -585,7 +590,7 @@ function analyzeFunction(fnDecl: FnDecl) {
     }
     // Note: parameters are not considered to be locals here (mutating them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
-      const symbol = getNodeSymbol(node);
+      const symbol = getSymbol(node);
       if (symbol !== Nothing) locals.add(symbol);
     }
     else {
@@ -632,7 +637,7 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
   // If it's a literal type, it'll get the base type; otherwise, nothing happens
   const type = tsMorphNode.getType().getBaseTypeOfLiteralType();
-  const maybeSymbol = getNodeSymbol(type);
+  const maybeSymbol = getSymbol(type);
   return maybeSymbol?.getName() ?? type.getText();
 }
 

@@ -75,11 +75,12 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     class UserDatabaseClient {}
 
     class Knex {
-      raw(...x: string) {}
+      raw(...x: any[]) {}
     }
 
     class PrismaClient {
-      $queryRawUnsafe(...x: string) {}
+      $queryRawUnsafe(...x: any[]) {}
+      $executeRawUnsafe(...x: any[]) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
