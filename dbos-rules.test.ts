@@ -277,6 +277,9 @@ const testSet: TestSet = [
         ctxt.client.raw(aParam);
         ctxt.client.raw(aParam + (5).toString()); // This fails for two reasons (but only shows one)
         ctxt.client.raw((5).toString()); // And this fails like usual
+
+        const foo = 5; // Testing numeric literals! Just thrown in here.
+        ctxt.client.raw(5 + foo * 500 * foo);
       `,
         Array(4).fill("sqlInjection")
       ),
@@ -315,9 +318,9 @@ const testSet: TestSet = [
         ctxt.client.$queryRawUnsafe((5).toString()); // Fail
         ctxt.client.$queryRawUnsafe("literal"); // No fail
         ctxt.client.$executeRawUnsafe((5).toString()); // Fail
-        ctxt.client.$executeRawUnsafe("the-literal", 5); // Fail
+        ctxt.client.$executeRawUnsafe("the-literal", 5); // No fail
         `,
-        Array(3).fill("sqlInjection"),
+        Array(2).fill("sqlInjection"),
         "PrismaClient"
       )
     ]

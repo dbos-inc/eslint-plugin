@@ -373,7 +373,9 @@ function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier)
 
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMessageIdWithFormatData> {
   /*
-  A literal-reducible value is either a literal string, or a variable that reduces down to a literal string. Acronym: LR.
+  A literal-reducible value is either a literal string/number, or a variable that reduces down to a literal string/number. Acronym: LR.
+  I'm just mentioning numbers here since the core allowed value is a string or number literal (but the main query parameter is a string).
+
   Here's what's allowed for SQL string parameters (from a supported callsite):
     1. LR
     2. LRs concatenated with other LRs
