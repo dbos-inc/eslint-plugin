@@ -537,7 +537,7 @@ function analyzeFunction(fnDecl: FnDecl) {
   to the stack getting reset if `analyzeFunction` is called again). */
 
   // This stack variant is slower for `isLocal`, but uses less memory for symbols allocated
-  const stack: Set<Symbol>[] = [new Set()]
+  const stack: Set<Symbol>[] = [new Set()];
   const getCurrentFrame = () => stack[stack.length - 1];
   const pushFrame = () => stack.push(new Set());
   const popFrame = () => stack.pop(); // Would I resolve the symbol faster in `isLocal` if checking backwards?
