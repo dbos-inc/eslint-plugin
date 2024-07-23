@@ -49,7 +49,7 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 
 // This maps the ORM client name to a list of raw SQL query calls to check
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
-  ["PoolClient", ["TODO"]],
+  ["PoolClient", ["query"]], // TODO: support `queryWithClient`
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
   ["TypeORMEntityManager", ["TODO"]],
   ["Knex", ["raw"]]
@@ -760,7 +760,7 @@ export const dbosStaticAnalysisRule = createRule({
     }
   },
 
-  name: 'dbos-static-analysis',
+  name: "dbos-static-analysis",
 
   meta: {
     schema: [],
@@ -778,7 +778,7 @@ module.exports = {
     version: "2.0.0"
   },
 
-  rules: {'dbos-static-analysis': dbosStaticAnalysisRule},
+  rules: { "dbos-static-analysis": dbosStaticAnalysisRule },
 
   plugins: {
     "@typescript-eslint": tslintPlugin,
