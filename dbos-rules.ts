@@ -32,7 +32,7 @@ type EslintContext = TSESLint.RuleContext<string, unknown[]>;
 
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
-type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
+type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: tsExternal.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
 type ErrorCheckerResult = Maybe<string | ErrorMessageIdWithFormatData>;
@@ -51,9 +51,9 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
   ["PoolClient", ["query"]], // TODO: support `queryWithClient`
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
-  ["TypeORMEntityManager", ["TODO"]],
-  ["Knex", ["raw"]]
-  // TODO: also support `UserDatabase` (if applicable)
+  ["TypeORMEntityManager", ["query"]],
+  ["Knex", ["raw"]],
+  ["UserDatabase", ["query"]] // TODO: support `queryWithClient`
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -146,7 +146,6 @@ TODO (requests from others, and general things for me to do):
 - Chuck gave a suggestion to allow some function calls for LR-values; and do this by finding a way to mark them as constant
 
 From me:
-- More callsite support
 - Run this over `dbos-transact`
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
 - Should I check more functions for SQL injection, if non-transactions are allowed to run raw queries?
@@ -738,6 +737,8 @@ const createRule = ESLintUtils.RuleCreator((_) => "https://docs.dbos.dev/api-ref
 
 export const dbosStaticAnalysisRule = createRule({
   create: (context: EslintContext) => {
+    // panic(`Parser path: ${context.parserPath}`);
+
     return {
       /* Note: I am working with ts-morph because it has
       stronger typing, and it's easier to work with the AST
@@ -773,6 +774,8 @@ module.exports = {
     "security": secPlugin,
     "no-secrets": noSecrets
   },
+
+  parser: "@typescript-eslint/parser",
 
   configs: {
     dbosBaseConfig: recConfig, // This is deprecated!
