@@ -485,12 +485,8 @@ function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]>
 
   if (maybeInfo !== Nothing) {
     const callArgs = callExpr.getArguments();
-
-    for (const callSite of maybeInfo) { // TODO: use `any` here somehow
-      if (callSite === identifiers[1].getText()) {
-        return callArgs;
-      }
-    }
+    const callSiteHere = identifiers[1].getText();
+    if (maybeInfo.includes(callSiteHere)) return callArgs;
   }
 }
 
@@ -499,7 +495,7 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     if (maybeArgs !== Nothing) {
-      for (const arg of maybeArgs) { // TODO: use `any` here somehow
+      for (const arg of maybeArgs) { // TODO: use `some` here somehow
         const injectionFailure = checkCallForInjection(arg, fnDecl);
         if (injectionFailure !== Nothing) return injectionFailure;
       }
