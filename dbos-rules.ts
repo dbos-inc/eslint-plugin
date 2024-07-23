@@ -482,35 +482,23 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
 function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]> {
   const callExprWithoutParams = callExpr.getExpression();
 
-  // `client.<callName>`, or `ctxt.client.<callName>`
+  // `client.<callName>`, or `ctxt.client.<callName>`, and so on with the prefixes
   const identifiers = callExprWithoutParams.getDescendantsOfKind(SyntaxKind.Identifier);
-  if (identifiers.length !== 2 && identifiers.length !== 3) return;
 
   const identifierTypeNames = identifiers.map(getTypeNameForTsMorphNode);
+  if (identifierTypeNames.length < 2) return; // Can't recognize a raw SQL call for 0 or 1 identifiers
 
-  if (identifiers.length === 3) {
-    // If it's the 3-identifier variant, check that it's from a `TransactionContext`
-    if (identifierTypeNames[0] !== "TransactionContext") return;
+  const expectedClient = identifierTypeNames[identifierTypeNames.length - 2];
+  const info = ormClientInfoForRawSqlQueries.get(expectedClient);
+  if (info === Nothing) return;
 
-    // Removing the context from the front
-    identifiers.shift();
-    identifierTypeNames.shift();
-  }
-
-  //////////
-
-  const maybeInfo = ormClientInfoForRawSqlQueries.get(identifierTypeNames[0]);
-
-  if (maybeInfo !== Nothing) {
-    const callArgs = callExpr.getArguments();
-    const callSiteHere = identifiers[1].getText();
-    if (maybeInfo.includes(callSiteHere)) return callArgs;
-  }
+  const expectedRawQueryCall = identifiers[identifiers.length - 1].getText();
+  if (info.includes(expectedRawQueryCall)) return callExpr.getArguments();
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (Node.isCallExpression(node)) {
-   const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
+    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     if (maybeArgs !== Nothing) {
       for (const arg of maybeArgs) {

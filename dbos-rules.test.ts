@@ -82,6 +82,11 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
       $executeRawUnsafe(...x: any[]) {}
     }
 
+    class PoolClient {
+      query(...x: any[]) {}
+      queryWithClient(client: any, ...x: any[]) {}
+    }
+
     function Transaction(target?: any, key?: any, descriptor?: any): any {
       return descriptor;
     }
@@ -322,6 +327,20 @@ const testSet: TestSet = [
         `,
         Array(2).fill("sqlInjection"),
         "PrismaClient"
+      ),
+
+      // Failure test #7 (testing `PoolClient`)
+      makeSqlInjectionFailureTest(`
+        ctxt.client.query("bob" + (5).toString()); // That works...
+
+        const foo = ctxt.client; // And that does...
+        foo.query("bob" + (5).toString());
+
+        const obj = {bob: ctxt.client};
+        obj.bob.query("bob" + (5).toString());
+        `,
+        Array(3).fill("sqlInjection"),
+        "PoolClient"
       )
     ]
   ],
