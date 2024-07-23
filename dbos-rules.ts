@@ -149,6 +149,7 @@ From me:
 - More callsite support
 - Run this over `dbos-transact`
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
+- Should I check more functions for SQL injection, if non-transactions are allowed to run raw queries?
 */
 
 ////////// These are some utility functions
@@ -302,7 +303,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
 
 ////////// This code is for detecting SQL injections
 
-function getNodePosInFile(node: Node) : {line: number, column: number} {
+function getNodePosInFile(node: Node): {line: number, column: number} {
   return node.getSourceFile().getLineAndColumnAtPos(node.getStart());
 }
 
@@ -506,8 +507,6 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     if (maybeArgs !== Nothing) {
-      // return checkCallForInjection(maybeArgs[0], fnDecl);
-
       for (const arg of maybeArgs) {
         const injectionFailure = checkCallForInjection(arg, fnDecl);
         if (injectionFailure !== Nothing) return injectionFailure;
