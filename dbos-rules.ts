@@ -511,9 +511,11 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-// Note: a workflow can never be a transaction, so no need to worry about overlap here
-const decoratorSetErrorCheckerMapping: [Set<string>, ErrorChecker[]][] = [
-  [new Set(["Transaction"]), [isSqlInjection]], // Checking for SQL injection here
+/* Note: a workflow can never be a transaction, so no need to worry about overlap here.
+Also, note: checking all functions for SQL injection, since oftentimes, functions will do
+transactions without the decorator. */
+const decoratorSetErrorCheckerMapping: [Maybe<Set<string>>, ErrorChecker[]][] = [
+  [Nothing, [isSqlInjection]], // Checking for SQL injection here
   [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]] // Checking for nondeterminism here
 ];
 
@@ -583,9 +585,8 @@ function analyzeFunction(fnDecl: FnDecl) {
     }
     else {
       for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
-        if (functionHasDecoratorInSet(fnDecl, decoratorSet)) {
+        if (decoratorSet === Nothing || functionHasDecoratorInSet(fnDecl, decoratorSet)) {
           errorCheckers.forEach((errorChecker) => runErrorChecker(errorChecker, node));
-          break; // This assumes that applying one decorator means that you can't apply another on top of it
         }
       }
     }
