@@ -87,6 +87,14 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
       queryWithClient(client: any, ...x: any[]) {}
     }
 
+    class TypeORMEntityManager {
+      query(...x: any[]) {}
+    }
+
+    class UserDatabase {
+      query(...x: any[]) {}
+    }
+
     function Transaction(target?: any, key?: any, descriptor?: any): any {
       return descriptor;
     }
@@ -341,7 +349,23 @@ const testSet: TestSet = [
         `,
         Array(3).fill("sqlInjection"),
         "PoolClient"
-      )
+      ),
+
+      // Failure test #8 (testing `TypeORMEntityManager`)
+      makeSqlInjectionFailureTest(`
+        ctxt.client.query("foo" + (5).toString());
+        `,
+        Array(1).fill("sqlInjection"),
+        "TypeORMEntityManager"
+      ),
+
+      // Failure test #9 (testing `UserDatabase`)
+      makeSqlInjectionFailureTest(`
+        const userDb = {} as UserDatabase;
+        userDb.query("foo" + (5).toString());
+        `,
+        Array(1).fill("sqlInjection")
+      ),
     ]
   ],
 
@@ -431,7 +455,7 @@ const testSet: TestSet = [
 
       // Awaiting on a method with a leftmost `WorkflowContext`, #2
       makeDeterminismSuccessTest(
-        "class ShopUtilities {}; const orderId: number = 20; await ctxt.invoke(ShopUtilities).retrieveOrder(orderId);",
+        "class ShopUtilities {}; const orderId = 20; await ctxt.invoke(ShopUtilities).retrieveOrder(20);",
         "ctxt: WorkflowContext"
       ),
 
@@ -469,7 +493,7 @@ const testSet: TestSet = [
 
       // Awaiting on a not-allowed class, #2
       makeDeterminismFailureTest(
-        "class ShopUtilities {}; const orderId: number = 20; await illegal.invoke(ShopUtilities).retrieveOrder(orderId);",
+        "class ShopUtilities {}; const orderId = 20; await illegal.invoke(ShopUtilities).retrieveOrder(orderId);",
         ["awaitingOnNotAllowedType"],
         "illegal: IllegalClassToUse<any>"
       ),
