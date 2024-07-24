@@ -365,7 +365,7 @@ const testSet: TestSet = [
         userDb.query("foo" + (5).toString());
         `,
         Array(1).fill("sqlInjection")
-      ),
+      )
     ]
   ],
 
