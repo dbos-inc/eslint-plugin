@@ -677,8 +677,34 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.
-This might be due to an unsupported local version of typescript-eslint that you installed.\n`);
+      const fs = require("fs"), path = require("path");
+
+      let localPackageJson;
+
+      try {localPackageJson = require("../package.json");}
+      catch {
+        try {localPackageJson = require("./package.json");}
+        catch {panic("Hoped to find a local package.json. A statemented root node error occured, but could not proceed because this file is missing. Dirname: " + __dirname);}
+      }
+
+      const possibleConflicts = ["typescript-eslint", "@typescript-eslint/utils", "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"];
+
+      let accumError = "", conflictId = 1;
+
+      for (const possibleConflict of possibleConflicts) {
+        const oneOut = path.join(__dirname, "../../../", possibleConflict, "package.json");
+
+        if (fs.existsSync(oneOut)) {
+          accumError += `#${conflictId}, ${possibleConflict}: ${require(oneOut).version}. Expected: ${localPackageJson.dependencies[possibleConflict]}.\n`;
+          conflictId++;
+        }
+      }
+
+      const accumErrorMessage = accumError !== ""
+        ? `Dependency conflicts (remove your local installations of these):\n${accumError}`
+        : "Hm, unsure of the error origin.";
+
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}`);
     }
   }
   finally {

@@ -25,6 +25,9 @@
     "@typescript-eslint/parser": "7.14",
     "@typescript-eslint/eslint-plugin": "7.14"
   },
+  "peerDependencies": {
+    "typescript": "5.4.2"
+  },
   "devDependencies": {
     "@typescript-eslint/rule-tester": "7.14",
     "vitest": "^1.6.0"
