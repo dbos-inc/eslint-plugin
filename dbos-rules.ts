@@ -330,19 +330,19 @@ function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDecla
   return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
 }
 
-// This function scans the function body, and finds all references to the given identifier (excluding the one passed in)
-function* getRValuesAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
+// This function scans the function body, and finds all things assigned to the given identifier (excluding the one passed in)
+function* getThingsAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
   for (const param of fnDecl.getParameters()) {
-    yield* getCorrespondingRValuesWithinNode(param);
+    yield* getAssignmentsToIdentifier(param);
   }
 
-  yield* getCorrespondingRValuesWithinNode(fnDecl);
+  yield* getAssignmentsToIdentifier(fnDecl);
 
   //////////
 
-  function* getCorrespondingRValuesWithinNode(node: Node): Generator<Expression | "NotRValueButFnParam"> {
+  function* getAssignmentsToIdentifier(node: Node): Generator<Expression | "NotRValueButFnParam"> {
     for (const child of node.getChildren()) { // Could I iterate through here without allocating the children?
-      yield* getCorrespondingRValuesWithinNode(child);
+      yield* getAssignmentsToIdentifier(child);
 
       ////////// First, see if the child should be checked or not
 
@@ -435,11 +435,12 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
       });
     }
     else if (Node.isIdentifier(node)) {
-      for (const rValueAssigned of getRValuesAssignedToIdentifier(fnDecl, node)) {
-        const isParam = rValueAssigned === "NotRValueButFnParam";
+      for (const thingAssigned of getThingsAssignedToIdentifier(fnDecl, node)) {
+        // If it's not a function param, it's an rvalue expression
+        const isParam = thingAssigned === "NotRValueButFnParam";
 
         if (isParam) rootProblemNodes.add(node);
-        if (isParam || !isLR(rValueAssigned)) return false;
+        if (isParam || !isLR(thingAssigned)) return false;
       }
 
       return true;
