@@ -330,58 +330,49 @@ function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDecla
   return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
 }
 
-// This function scans the function body, and finds all things assigned to the given identifier (excluding the one passed in)
-function* getThingsAssignedToIdentifier(fnDecl: FnDecl, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
-  for (const param of fnDecl.getParameters()) {
-    yield* getAssignmentsToIdentifier(param);
-  }
+// This function scans the scope to checkbody, and finds all things assigned to the given identifier (excluding the one passed in). A thing is either an rvalue expression or a function parameter.
+function* getAssignmentsToIdentifier(scopeToCheck: Node, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
+  for (const child of scopeToCheck.getChildren()) { // Could I iterate through here without allocating the children?
+    yield* getAssignmentsToIdentifier(child, identifier);
 
-  yield* getAssignmentsToIdentifier(fnDecl);
+    ////////// First, see if the child should be checked or not
 
-  //////////
+    const isTheSameButUsedInAnotherPlace = (
+      child !== identifier // Not the same node as our identifier
+      && Node.isIdentifier(child) // This child is an identifier
+      && getSymbol(child) === getSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
+    );
 
-  function* getAssignmentsToIdentifier(node: Node): Generator<Expression | "NotRValueButFnParam"> {
-    for (const child of node.getChildren()) { // Could I iterate through here without allocating the children?
-      yield* getAssignmentsToIdentifier(child);
+    if (!isTheSameButUsedInAnotherPlace) continue;
 
-      ////////// First, see if the child should be checked or not
+    ////////// Then, analyze the child
 
-      const isTheSameButUsedInAnotherPlace = (
-        child !== identifier // Not the same node as our identifier
-        && Node.isIdentifier(child) // This child is an identifier
-        && getSymbol(child) === getSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
-      );
+    const parent = child.getParent() ?? panic("When would the parent to a reference ever not be defined?");
 
-      if (!isTheSameButUsedInAnotherPlace) continue;
+    if (Node.isVariableDeclaration(parent)) {
+      // In this case, silently skip the reference (a compilation step will catch any hoisting issues)
+      if (!identifierUsageIsValid(identifier, parent)) continue;
 
-      ////////// Then, analyze the child
+      const initialValue = parent.getInitializer();
+      if (initialValue === Nothing) continue; // Not initialized yet, so skip this reference
 
-      const parent = child.getParent() ?? panic("When would the parent to a reference ever not be defined?");
+      yield initialValue;
+    }
+    else {
+      const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
 
-      if (Node.isVariableDeclaration(parent)) {
-        // In this case, silently skip the reference (a compilation step will catch any hoisting issues)
-        if (!identifierUsageIsValid(identifier, parent)) continue;
-
-        const initialValue = parent.getInitializer();
-        if (initialValue === Nothing) continue; // Not initialized yet, so skip this reference
-
-        yield initialValue;
+      if (maybeLAndRValues !== Nothing) {
+        yield maybeLAndRValues[1];
       }
-      else {
-          const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
-
-          if (maybeLAndRValues !== Nothing) {
-            yield maybeLAndRValues[1];
-          }
-          else if (Node.isParameterDeclaration(parent)) {
-            yield "NotRValueButFnParam";
-          }
+      // This only applies if the scope to check if a function
+      else if (Node.isParameterDeclaration(parent)) {
+        yield "NotRValueButFnParam";
       }
     }
   }
 }
 
-function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMessageIdWithFormatData> {
+function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean): Maybe<ErrorMessageIdWithFormatData> {
   /*
   A literal-reducible value is either a literal string/number, or a variable that reduces down to a literal string/number. Acronym: LR.
   I'm just mentioning numbers here since the core allowed value is a string or number literal (but the main query parameter is a string).
@@ -420,6 +411,28 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   const nodeLRStates: Map<Node, boolean> = new Map();
   const rootProblemNodes: Set<Node> = new Set();
 
+  enum ScopeAssignmentCategory {
+    NotAssignedToInScope,
+    AssignedToNonLRValue,
+    OnlyAssignedToLRValues
+  }
+
+  function getIdentifierAssignmentCategory(identifier: Identifier, scopeToCheck: Node): ScopeAssignmentCategory {
+    let foundAssignedThing = false;
+
+    for (const thingAssigned of getAssignmentsToIdentifier(scopeToCheck, identifier)) {
+      foundAssignedThing = true;
+
+      // If it's not a function param, it's an rvalue expression
+      const isParam = thingAssigned === "NotRValueButFnParam";
+
+      if (isParam) rootProblemNodes.add(identifier);
+      if (isParam || !isLR(thingAssigned)) return ScopeAssignmentCategory.AssignedToNonLRValue;
+    }
+
+    return foundAssignedThing ? ScopeAssignmentCategory.OnlyAssignedToLRValues : ScopeAssignmentCategory.NotAssignedToInScope;
+  }
+
   function isLRWithoutStateCache(node: Node): boolean {
     if (Node.isStringLiteral(node) || Node.isNumericLiteral(node)) {
       return true;
@@ -435,15 +448,20 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
       });
     }
     else if (Node.isIdentifier(node)) {
-      for (const thingAssigned of getThingsAssignedToIdentifier(fnDecl, node)) {
-        // If it's not a function param, it's an rvalue expression
-        const isParam = thingAssigned === "NotRValueButFnParam";
+      const symbol = getSymbol(node);
 
-        if (isParam) rootProblemNodes.add(node);
-        if (isParam || !isLR(thingAssigned)) return false;
+      const scopeToExamine = (symbol !== Nothing && isLocal(symbol))
+        ? fnDecl : fnDecl.getFirstAncestorByKindOrThrow(SyntaxKind.SourceFile);
+
+      const assignmentCategory = getIdentifierAssignmentCategory(node, scopeToExamine);
+
+      switch (assignmentCategory) {
+        // Failing silently when there's nothing assigned to a value (the compiler will take care of this error)
+        case ScopeAssignmentCategory.NotAssignedToInScope: return true;
+        case ScopeAssignmentCategory.AssignedToNonLRValue: return false;
+        case ScopeAssignmentCategory.OnlyAssignedToLRValues: return true;
       }
 
-      return true;
     }
     else if (Node.isBinaryExpression(node)) {
       return isLR(node.getLeft()) && isLR(node.getRight());
@@ -501,13 +519,13 @@ function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]>
   if (info.includes(expectedRawQueryCall)) return callExpr.getArguments();
 }
 
-const isSqlInjection: ErrorChecker = (node, fnDecl, _isLocal) => {
+const isSqlInjection: ErrorChecker = (node, fnDecl, isLocal) => {
   if (Node.isCallExpression(node)) {
     const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
 
     // Just checking the first argument
     if (maybeArgs !== Nothing && maybeArgs.length !== 0) {
-      return checkCallForInjection(maybeArgs[0], fnDecl);
+      return checkCallForInjection(maybeArgs[0], fnDecl, isLocal);
     }
   }
 }
