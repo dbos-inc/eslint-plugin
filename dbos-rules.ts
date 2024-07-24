@@ -397,11 +397,11 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
 
-  /* If the node doesn't exist in `nodeLRResults`, it hasn't been explored yet.
+  /* If the node doesn't exist in `nodeLRStates`, it hasn't been explored yet.
   If its value is false, it's not LR. If its value is true, it's LR, or currently being
   computed (which can indicate the existence of a reference cycle).
 
-  Also, it's worthy of noting that I'm not doing this result caching
+  Also, it's worthy of noting that I'm not doing this state caching
   for the sake of efficiency: it's just so that reference cycles won't result
   in infinite recursion.
 
@@ -416,10 +416,10 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   they are declared), but that is a practical error that this linter plugin is not expected to pick up on.
   */
 
-  const nodeLRResults: Map<Node, boolean> = new Map();
+  const nodeLRStates: Map<Node, boolean> = new Map();
   const rootProblemNodes: Set<Node> = new Set();
 
-  function isLRWithoutResultCache(node: Node): boolean {
+  function isLRWithoutStateCache(node: Node): boolean {
     if (Node.isStringLiteral(node) || Node.isNumericLiteral(node)) {
       return true;
     }
@@ -456,16 +456,16 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   }
 
   function isLR(node: Node): boolean {
-    const maybeResult = nodeLRResults.get(node);
+    const maybeState = nodeLRStates.get(node);
 
-    if (maybeResult !== Nothing) {
-      return maybeResult;
+    if (maybeState !== Nothing) {
+      return maybeState;
     }
     else {
       // Ending up in a cycle (e.g. from `z = z + "foo";`) will mark the node as LR
-      nodeLRResults.set(node, true);
-      const wasLR = isLRWithoutResultCache(node);
-      nodeLRResults.set(node, wasLR);
+      nodeLRStates.set(node, true);
+      const wasLR = isLRWithoutStateCache(node);
+      nodeLRStates.set(node, wasLR);
       return wasLR;
     }
   }
