@@ -1,4 +1,3 @@
-import * as tsExternal from "typescript";
 import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
 
@@ -14,14 +13,6 @@ import {
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
 
-/*
-A problem that still remains (which I have not been able to resolve) is in regards to package versioning.
-I need certain package versions (whose versions are very tightly coupled; otherwise stuff will break) in this project's `package.json`.
-When a user of this package installs any of the dependencies here, the DBOS static analysis linter rule ends up using their installed version,
-which massively breaks things in various ways (mostly true to TypeScript compiler API tree structure incompatability). If you are reading this,
-and you know how to solve this, please let me know!
-*/
-
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
 ////////// These are some shared types
@@ -34,7 +25,7 @@ type EslintContext = TSESLint.RuleContext<string, unknown[]>;
 
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
-type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: tsExternal.TypeChecker};
+type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
 type ErrorCheckerResult = Maybe<string | ErrorMessageIdWithFormatData>;
@@ -686,12 +677,8 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const possibleVersioningError = `\
-This might be from disjoint TypeScript compiler API versions (ts-morph uses ${ts.version}, but ${tsExternal.version} is installed externally).
-If the versions are the same, check the version that typescript-eslint is using. A likely fix would be to match your local TypeScript version
-with one of these, as an exact version (no ^ or ~ prefixes); or to remove any local installations of this package's linting dependencies.`;
-
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}.\n`);
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.
+This might be due to an unsupported local version of typescript-eslint that you installed.\n`);
     }
   }
   finally {
