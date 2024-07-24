@@ -12,7 +12,7 @@ This [eslint](https://eslint.org/)/[typescript-eslint](https://typescript-eslint
 
 The fastest way to get started with DBOS is by following the [quickstart](https://docs.dbos.dev/getting-started/quickstart), where you'll learn how to get a backend running in less than five minutes.
 
-The tutorial and examples include setup of `eslint` with this plugin.
+See [here](https://docs.dbos.dev/api-reference/static-analysis) for more info on this plugin.
 
 ## Additional Documentation
 
