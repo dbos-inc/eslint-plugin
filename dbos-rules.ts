@@ -397,7 +397,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl): Maybe<ErrorMess
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
 
-  /* If the node doesn't exist in `nodeLRStates`, it hasn't been explored yet.
+  /*
+  If the node doesn't exist in `nodeLRStates`, it hasn't been explored yet.
   If its value is false, it's not LR. If its value is true, it's LR, or currently being
   computed (which can indicate the existence of a reference cycle).
 
