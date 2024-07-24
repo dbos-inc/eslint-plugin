@@ -152,6 +152,7 @@ From me:
 - Run this over `dbos-transact`
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
 - Should I check more functions for SQL injection, if non-transactions are allowed to run raw queries?
+- Mark some simple function calls as being constant (this could quickly spiral in terms of complexity)
 */
 
 ////////// These are some utility functions
