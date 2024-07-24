@@ -666,10 +666,10 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
     else {
       const possibleVersioningError = `\
 This might be from disjoint TypeScript compiler API versions (ts-morph uses ${ts.version}, but ${tsExternal.version} is installed externally).
-If the versions are the same, check the version that typescript-eslint is using. A likely fix would be to match your local
-TypeScript version with one of these, as an exact version (no ^ or ~ prefixes)`;
+If the versions are the same, check the version that typescript-eslint is using. A likely fix would be to match your local TypeScript version
+with one of these, as an exact version (no ^ or ~ prefixes); or to remove any local installations of this package's linting dependencies.`;
 
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}\n`);
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}.\n${possibleVersioningError}.\n`);
     }
   }
   finally {
@@ -775,8 +775,6 @@ module.exports = {
     "security": secPlugin,
     "no-secrets": noSecrets
   },
-
-  parser: "@typescript-eslint/parser",
 
   configs: {
     dbosBaseConfig: recConfig, // This is deprecated!
