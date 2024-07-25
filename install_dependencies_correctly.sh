@@ -13,11 +13,11 @@ rm -r dist
 
 set -e
 
-typescript_eslint_packages="typescript-eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser @typescript-eslint/utils"
+peer_and_dev_packages="typescript ts-morph typescript-eslint @typescript-eslint/eslint-plugin @typescript-eslint/parser @typescript-eslint/utils"
 
 plain="@types/node eslint-plugin-no-secrets eslint-plugin-security"
-peer="typescript ts-morph eslint $typescript_eslint_packages"
-dev="vitest @typescript-eslint/rule-tester$tseslv $typescript_eslint_packages"
+peer="eslint $peer_and_dev_packages"
+dev="vitest @typescript-eslint/rule-tester $peer_and_dev_packages"
 optional="@rollup/rollup-linux-x64-gnu"
 
 eval "npm remove $plain $peer $dev $optional"
