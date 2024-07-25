@@ -690,34 +690,8 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const possibleConflicts = [
-        "typescript",
-        "typescript-eslint", "@typescript-eslint/utils",
-        "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"
-      ];
-
-      let accumError = "";
-
-      for (const possibleConflict of possibleConflicts) {
-        /* The plugin runs from `node_modules/@dbos-inc/eslint-plugin/dist`; so first
-        go up to `node_modules`, and then into the possible conflict's `package.json` */
-        const packageJsonPath = path.join(__dirname, "../../../", possibleConflict, "package.json");
-
-        if (fs.existsSync(packageJsonPath)) {
-          const userInstalled = readJSON(packageJsonPath).version;
-          const needed = packageJsonInfo.peerDependencies[possibleConflict];
-
-          if (userInstalled !== needed) {
-            accumError += `> You installed ${possibleConflict}, version ${userInstalled} (but the plugin needs ${needed}).\n`;
-          }
-        }
-      }
-
-      const accumErrorMessage = (accumError === "") ? "Hm, unsure of the error origin."
-        : `Versioning conflicts made the plugin crash (see below).\n${accumError}` +
-          "To resolve these issues, run \`npm remove <packageName>\` on every conflicting package.";
-
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}\n`);
+      const dependencyMessage = "This may be due to a dependency issue; make sure that the same version of typescript-eslint is being used everywhere.";
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${dependencyMessage}\n`);
     }
   }
   finally {
