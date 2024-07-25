@@ -45,7 +45,7 @@ prepare_demo_apps_dir() {
   fi
 }
 
-tsc
+npm run build
 npm pack
 prepare_demo_apps_dir
 

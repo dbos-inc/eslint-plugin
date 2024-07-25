@@ -36,3 +36,6 @@ node_modules/
 *.swp
 *.swo
 examples/hello/.env
+
+# From a local e2e test
+dbos-demo-apps
