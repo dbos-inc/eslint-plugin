@@ -1,5 +1,5 @@
-import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
+import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 
 import {
   ts, createWrappedNode, Node, Type, FunctionDeclaration,
@@ -8,6 +8,9 @@ import {
   VariableDeclaration, VariableDeclarationKind, ParenthesizedExpression,
   Project
 } from "ts-morph";
+
+import * as fs from "fs";
+import * as path from "path";
 
 // Should I find TypeScript variants of these?
 const secPlugin = require("eslint-plugin-security");
@@ -146,7 +149,16 @@ From me:
 - Mark some simple function calls as being constant (this could quickly spiral in terms of complexity)
 */
 
+////////// This is some meta package info
+
+const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
+const packageJsonInfo = readJSON(path.join(__dirname, packageJsonPrefix, "package.json"));
+
 ////////// These are some utility functions
+
+function readJSON(path: string): any {
+  return JSON.parse(fs.readFileSync(path, "utf8"));
+}
 
 function panic(message: string): never {
   throw new Error(message);
@@ -673,37 +685,13 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
+      // TODO: just analyze the statements instead
       tsMorphNode.getFunctions().forEach(analyzeFunction);
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const fs = require("fs"), path = require("path");
-
-      let localPackageJson;
-
-      try {localPackageJson = require("../package.json");}
-      catch {
-        try {localPackageJson = require("./package.json");}
-        catch {panic("Hoped to find a local package.json. A statemented root node error occured, but could not proceed because this file is missing");}
-      }
-
-      const possibleConflicts = ["typescript-eslint", "@typescript-eslint/utils", "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"];
-
-      let accumError = "";
-
-      for (const possibleConflict of possibleConflicts) {
-        const packageJsonPath = path.join(__dirname, "../../../", possibleConflict, "package.json");
-
-        if (fs.existsSync(packageJsonPath)) {
-          accumError += `> You installed ${possibleConflict}, version ${require(packageJsonPath).version} (but the plugin needs ${localPackageJson.dependencies[possibleConflict]}).\n`;
-        }
-      }
-
-      const accumErrorMessage = accumError !== ""
-        ? `Versioning conflicts made the plugin crash (see below).\n${accumError}To resolve these issues, run \`npm remove <packageName>\` on every conflicting package.`
-        : "Hm, unsure of the error origin.";
-
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}\n`);
+      const dependencyMessage = "This may be due to a dependency issue; make sure that the same version of typescript-eslint is being used everywhere.";
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${dependencyMessage}\n`);
     }
   }
   finally {
@@ -798,8 +786,8 @@ export const dbosStaticAnalysisRule = createRule({
 
 module.exports = {
   meta: {
-    name: "@dbos-inc/eslint-plugin",
-    version: "2.0.0"
+    name: packageJsonInfo.name,
+    version: packageJsonInfo.version
   },
 
   rules: { "dbos-static-analysis": dbosStaticAnalysisRule },
