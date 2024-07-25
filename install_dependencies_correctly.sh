@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# This script exists to install the dependencies for this plugin during development (so only use it if you're developing the plugin itself!).
+# I have this script so that finding the right versions for all the dependencies will be easier (NPM will find versions that work with each other).
+
 do_install() {
   eval "npm i $1 $2"
 }
