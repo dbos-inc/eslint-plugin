@@ -684,27 +684,26 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       try {localPackageJson = require("../package.json");}
       catch {
         try {localPackageJson = require("./package.json");}
-        catch {panic("Hoped to find a local package.json. A statemented root node error occured, but could not proceed because this file is missing. Dirname: " + __dirname);}
+        catch {panic("Hoped to find a local package.json. A statemented root node error occured, but could not proceed because this file is missing");}
       }
 
       const possibleConflicts = ["typescript-eslint", "@typescript-eslint/utils", "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"];
 
-      let accumError = "", conflictId = 1;
+      let accumError = "";
 
       for (const possibleConflict of possibleConflicts) {
         const oneOut = path.join(__dirname, "../../../", possibleConflict, "package.json");
 
         if (fs.existsSync(oneOut)) {
-          accumError += `#${conflictId}, ${possibleConflict}: ${require(oneOut).version}. Expected: ${localPackageJson.dependencies[possibleConflict]}.\n`;
-          conflictId++;
+          accumError += `> You installed ${possibleConflict}, version ${require(oneOut).version} (but the plugin needs ${localPackageJson.dependencies[possibleConflict]}).\n`;
         }
       }
 
       const accumErrorMessage = accumError !== ""
-        ? `Dependency conflicts (remove your local installations of these):\n${accumError}`
+        ? `Versioning conflicts made the plugin crash (see below).\n${accumError}To resolve these issues, run \`npm remove <packageName>\` on every conflicting package.`
         : "Hm, unsure of the error origin.";
 
-      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}`);
+      panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}\n`);
     }
   }
   finally {
