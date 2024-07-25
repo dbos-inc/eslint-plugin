@@ -9,6 +9,9 @@ import {
   Project
 } from "ts-morph";
 
+import * as fs from "fs";
+import * as path from "path";
+
 // Should I find TypeScript variants of these?
 const secPlugin = require("eslint-plugin-security");
 const noSecrets = require("eslint-plugin-no-secrets");
@@ -146,7 +149,16 @@ From me:
 - Mark some simple function calls as being constant (this could quickly spiral in terms of complexity)
 */
 
+////////// This is some meta package info
+
+const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
+const packageJsonInfo = readJSON(path.join(__dirname, packageJsonPrefix, "package.json"));
+
 ////////// These are some utility functions
+
+function readJSON(path: string): any {
+  return JSON.parse(fs.readFileSync(path, "utf8"));
+}
 
 function panic(message: string): never {
   throw new Error(message);
@@ -677,25 +689,16 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const fs = require("fs"), path = require("path");
-
-      let localPackageJson;
-
-      try {localPackageJson = require("../package.json");}
-      catch {
-        try {localPackageJson = require("./package.json");}
-        catch {panic("Hoped to find a local package.json. A statemented root node error occured, but could not proceed because this file is missing");}
-      }
-
       const possibleConflicts = ["typescript-eslint", "@typescript-eslint/utils", "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"];
-
       let accumError = "";
 
       for (const possibleConflict of possibleConflicts) {
         const packageJsonPath = path.join(__dirname, "../../../", possibleConflict, "package.json");
 
         if (fs.existsSync(packageJsonPath)) {
-          accumError += `> You installed ${possibleConflict}, version ${require(packageJsonPath).version} (but the plugin needs ${localPackageJson.dependencies[possibleConflict]}).\n`;
+          const userInstalled = readJSON(packageJsonPath).version;
+          const needed = packageJsonInfo.dependencies[possibleConflict];
+          accumError += `> You installed ${possibleConflict}, version ${userInstalled} (but the plugin needs ${needed}).\n`;
         }
       }
 
@@ -798,8 +801,8 @@ export const dbosStaticAnalysisRule = createRule({
 
 module.exports = {
   meta: {
-    name: "@dbos-inc/eslint-plugin",
-    version: "2.0.0"
+    name: packageJsonInfo.name,
+    version: packageJsonInfo.version
   },
 
   rules: { "dbos-static-analysis": dbosStaticAnalysisRule },
