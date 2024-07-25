@@ -1,5 +1,5 @@
-import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 import * as tslintPlugin from "@typescript-eslint/eslint-plugin";
+import { ESLintUtils, TSESLint, TSESTree, ParserServicesWithTypeInformation } from "@typescript-eslint/utils";
 
 import {
   ts, createWrappedNode, Node, Type, FunctionDeclaration,
@@ -685,11 +685,17 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
+      // TODO: just analyze the statements instead
       tsMorphNode.getFunctions().forEach(analyzeFunction);
       tsMorphNode.getClasses().forEach(analyzeClass);
     }
     else {
-      const possibleConflicts = ["typescript-eslint", "@typescript-eslint/utils", "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"];
+      const possibleConflicts = [
+        "typescript",
+        "typescript-eslint", "@typescript-eslint/utils",
+        "@typescript-eslint/parser", "@typescript-eslint/eslint-plugin"
+      ];
+
       let accumError = "";
 
       for (const possibleConflict of possibleConflicts) {
@@ -697,14 +703,14 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
 
         if (fs.existsSync(packageJsonPath)) {
           const userInstalled = readJSON(packageJsonPath).version;
-          const needed = packageJsonInfo.dependencies[possibleConflict];
+          const needed = packageJsonInfo.peerDependencies[possibleConflict];
           accumError += `> You installed ${possibleConflict}, version ${userInstalled} (but the plugin needs ${needed}).\n`;
         }
       }
 
-      const accumErrorMessage = accumError !== ""
-        ? `Versioning conflicts made the plugin crash (see below).\n${accumError}To resolve these issues, run \`npm remove <packageName>\` on every conflicting package.`
-        : "Hm, unsure of the error origin.";
+      const accumErrorMessage = (accumError === "") ? "Hm, unsure of the error origin."
+        : `Versioning conflicts made the plugin crash (see below).\n${accumError}` +
+          "To resolve these issues, run \`npm remove <packageName>\` on every conflicting package.";
 
       panic(`Was expecting a statemented root node! Got this kind instead: ${tsMorphNode.getKindName()}. ${accumErrorMessage}\n`);
     }
