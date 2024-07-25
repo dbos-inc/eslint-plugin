@@ -699,12 +699,17 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       let accumError = "";
 
       for (const possibleConflict of possibleConflicts) {
+        /* The plugin runs from `node_modules/@dbos-inc/eslint-plugin/dist`; so first
+        go up to `node_modules`, and then into the possible conflict's `package.json` */
         const packageJsonPath = path.join(__dirname, "../../../", possibleConflict, "package.json");
 
         if (fs.existsSync(packageJsonPath)) {
           const userInstalled = readJSON(packageJsonPath).version;
           const needed = packageJsonInfo.peerDependencies[possibleConflict];
-          accumError += `> You installed ${possibleConflict}, version ${userInstalled} (but the plugin needs ${needed}).\n`;
+
+          if (userInstalled !== needed) {
+            accumError += `> You installed ${possibleConflict}, version ${userInstalled} (but the plugin needs ${needed}).\n`;
+          }
         }
       }
 
