@@ -692,10 +692,10 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
       let accumError = "";
 
       for (const possibleConflict of possibleConflicts) {
-        const oneOut = path.join(__dirname, "../../../", possibleConflict, "package.json");
+        const packageJsonPath = path.join(__dirname, "../../../", possibleConflict, "package.json");
 
-        if (fs.existsSync(oneOut)) {
-          accumError += `> You installed ${possibleConflict}, version ${require(oneOut).version} (but the plugin needs ${localPackageJson.dependencies[possibleConflict]}).\n`;
+        if (fs.existsSync(packageJsonPath)) {
+          accumError += `> You installed ${possibleConflict}, version ${require(packageJsonPath).version} (but the plugin needs ${localPackageJson.dependencies[possibleConflict]}).\n`;
         }
       }
 
