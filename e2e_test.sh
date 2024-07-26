@@ -19,6 +19,7 @@ directories=(
   greeting-emails
   shop-guide
   tpcc
+  widget-fulfillment
   widget-store
   yky-social
 )
