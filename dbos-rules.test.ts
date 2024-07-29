@@ -245,6 +245,11 @@ const testSet: TestSet = [
       makeSqlInjectionSuccessTest(`
         const client = ctxt.client;
         client.raw("foo");
+      `),
+
+      // Success test #9 (testing unsubstituted template literals)
+      makeSqlInjectionSuccessTest(`
+        ctxt.client.raw(\`foo\`);
       `)
     ],
     [
