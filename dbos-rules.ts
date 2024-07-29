@@ -437,7 +437,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 
   function isLRWithoutStateCache(node: Node): boolean {
-    if (Node.isStringLiteral(node) || Node.isNumericLiteral(node)) {
+    // Note: a no-substitution template literal might be something like `foo` (as compared to `foo${bar}`
+    if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node) || Node.isNumericLiteral(node)) {
       return true;
     }
     /* i.e. if it's a format string (like `${foo} ${bar} ${baz}`).
@@ -464,7 +465,6 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
         case ScopeAssignmentCategory.AssignedToNonLRValue: return false;
         case ScopeAssignmentCategory.OnlyAssignedToLRValues: return true;
       }
-
     }
     else if (Node.isBinaryExpression(node)) {
       return isLR(node.getLeft()) && isLR(node.getRight());

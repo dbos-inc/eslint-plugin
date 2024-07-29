@@ -1,6 +1,6 @@
 {
   "name": "@dbos-inc/eslint-plugin",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "eslint plugin for DBOS SDK",
   "license": "MIT",
   "repository": {
