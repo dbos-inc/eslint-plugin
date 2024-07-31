@@ -820,7 +820,7 @@ export const dbosStaticAnalysisRule = createRule({
   meta: {
     schema: [],
     type: "suggestion",
-    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
+    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking, SQL injection detection, etc..." },
     messages: Object.fromEntries(errorMessages)
   },
 
