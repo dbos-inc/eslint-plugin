@@ -12,10 +12,6 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 
-// Should I find TypeScript variants of these?
-const secPlugin = require("eslint-plugin-security");
-const noSecrets = require("eslint-plugin-no-secrets");
-
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
 ////////// These are some shared types
@@ -151,10 +147,6 @@ From me:
 */
 
 ////////// These are some utility functions
-
-function readJSON(path: string): any {
-  return JSON.parse(fs.readFileSync(path, "utf8"));
-}
 
 function panic(message: string): never {
   throw new Error(message);
@@ -836,7 +828,8 @@ export const dbosStaticAnalysisRule = createRule({
 });
 
 const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
-const packageJsonInfo = readJSON(path.join(__dirname, packageJsonPrefix, "package.json"));
+const packageJsonPath = path.join(__dirname, packageJsonPrefix, "package.json");
+const packageJsonInfo = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
 module.exports = {
   meta: {
@@ -848,8 +841,10 @@ module.exports = {
 
   plugins: {
     "@typescript-eslint": tslintPlugin,
-    "security": secPlugin,
-    "no-secrets": noSecrets
+
+    // Should I find TypeScript variants of these?
+    "security": require("eslint-plugin-security"),
+    "no-secrets": require("eslint-plugin-no-secrets")
   },
 
   configs: {
