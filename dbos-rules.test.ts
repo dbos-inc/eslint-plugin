@@ -168,12 +168,12 @@ const testSet: TestSet = [
         ctxt.client.raw(foo + foo + bar + foo);
       `),
 
-      // Success test #2 (deep variable tracing)
+      // Success test #2 (deep variable tracing, along with some literal type concatenation)
       makeSqlInjectionSuccessTest(`
         let w, x, y, z, å = "ghi";
 
-        w = "abc" + "def" + å;
-        x = w;
+        w = "abc" + "def" + å + 503n + 504 + true + false + undefined + null + {} + {a: 3} + function() {} + (() => {}) + [1];
+        x = w + false;
         y = x;
         z = y;
 
@@ -364,12 +364,12 @@ const testSet: TestSet = [
         "TypeORMEntityManager"
       ),
 
-      // Failure test #9 (testing `UserDatabase`)
+      // Failure test #9 (testing `UserDatabase`, and not not using `TransactionContext`)
       makeSqlInjectionFailureTest(`
         const userDb = {} as UserDatabase;
         userDb.query("foo" + (5).toString());
         `,
-        Array(1).fill("sqlInjection")
+        ["transactionDoesntUseTheDatabase", "sqlInjection"]
       )
     ]
   ],
