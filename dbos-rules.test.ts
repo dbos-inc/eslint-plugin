@@ -142,10 +142,9 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[], s
 /* TODO: perhaps make some test helper functions to make that better, or split tests into more files
 (core goal: isolate what each test tests for), and that might also make them somewhat easier to read */
 const testSet: TestSet = [
-  /* Note: the tests for SQL injection do not
-  involve any actual SQL code; they just test
-  for any non-LR-strings being passed to a raw SQL query callsite.
-  You can find more info on LR-strings in `dbos-rules.ts`. */
+  /* Note: the tests for SQL injection do not involve any actual SQL code;
+  they just test for any non-LR-values being passed to a raw SQL query callsite.
+  You can find more info on LR-values in `dbos-rules.ts`. */
 
   ["sql injection",
     [
@@ -173,7 +172,7 @@ const testSet: TestSet = [
         let w, x, y, z, å = "ghi";
 
         w = "abc" + "def" + å + 503n + 504 + true + false + undefined + null + {} + {a: 3} + function() {} + (() => {}) + [1];
-        x = w + false;
+        x = w;
         y = x;
         z = y;
 
