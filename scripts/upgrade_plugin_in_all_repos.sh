@@ -17,6 +17,8 @@ log() {
 
 ####################################################################################################
 
+# TODO: update this as more repos/directories use the plugin
+
 demo_app_directories=(
   bank/bank-backend
   bank/bank-frontend
@@ -91,11 +93,9 @@ upgrade_repo() {
 
   ##########
 
+  all_upgrades_skipped=true
   all_directories=${repos_with_upgradeable_directories[${repo_name}]};
 
-  all_upgrades_skipped=true
-
-  # Then, start upgrading.
   for directory in $all_directories; do
     upgrade_output=$(upgrade_directory "$directory")
 
