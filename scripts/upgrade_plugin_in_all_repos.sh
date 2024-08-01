@@ -56,7 +56,7 @@ get_eslint_plugin_version() {
 
 upgrade_directory() {
   directory="$1"
-  log "Begin process of upgrading directory $directory"
+  log "Begin process of upgrading directory '$directory'"
 
   orig_dir="$PWD"
   cd "$directory"
@@ -68,6 +68,7 @@ upgrade_directory() {
   if [[ "$previously_installed" = "$version_after_install" ]]; then
     log "No upgrade needed. Already at the latest version."
   else
+    log "Upgrade successful. Running linter."
     npm run lint
   fi
 
@@ -76,7 +77,7 @@ upgrade_directory() {
 
 upgrade_repo() {
   repo_name="$1"
-  log "Begin process of upgrading repo $repo_name"
+  log "Begin process of upgrading repo '$repo_name'"
 
   # First, clone the repo if it doesn't exist, or pull the latest changes if it does.
   if [[ -d "$repo_name" ]]; then
@@ -92,10 +93,24 @@ upgrade_repo() {
 
   all_directories=${repos_with_upgradeable_directories[${repo_name}]};
 
+  all_upgrades_skipped=true
+
   # Then, start upgrading.
   for directory in $all_directories; do
-    upgrade_directory "$directory"
+    upgrade_output=$(upgrade_directory "$directory")
+
+    if [[ "$upgrade_output" =~ "Upgrade successful. Running linter." ]]; then
+      all_upgrades_skipped=false
+    fi
+
+    echo "$upgrade_output"
   done
+
+  if [[ $all_upgrades_skipped = true ]]; then
+    log "Skipping PR for repo '$repo_name'."
+    cd ..
+    return
+  fi
 
   ##########
 
@@ -106,17 +121,14 @@ upgrade_repo() {
 
   branch_name="CaspianA1/dbos_eslint_plugin_upgrade_to_$version"
   git checkout -b "$branch_name"
+
   git add .
   git commit -m "Upgrade @dbos-inc/eslint-plugin to the latest version, which is $version."
   git push --set-upstream origin "$branch_name"
 
-  # TODO: if no upgrades were needed, then don't make a PR
-  # echo "THE RESULT: $?"
-
-  log "Finished upgrading $repo_name. Making a PR now..."
-
+  log "Finished upgrading '$repo_name'. Making a PR now..."
   open "https://github.com/dbos-inc/$repo_name/pull/new/CaspianA1/$branch_name"
-  git status
+
   cd ..
 }
 
