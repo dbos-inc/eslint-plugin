@@ -96,7 +96,6 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   return new Map([
     ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'"],
     ["transactionDoesntUseTheDatabase", "A transaction should always use the database; otherwise, it is just wasting time"],
-
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
