@@ -568,7 +568,7 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
       // The middle is the dot between the identifiers
       const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
 
-      if (getSymbol(left) == transactionContextSymbol && right.getText() === "client") {
+      if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
         foundDatabaseUsage = true;
         traversalControl.stop();
       }
