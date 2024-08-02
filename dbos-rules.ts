@@ -564,7 +564,7 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
   let foundDatabaseUsage = false;
 
   fnDecl.getBody()!.forEachDescendant((descendant, traversalControl) => {
-    if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() === 3) {
+    if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() >= 3) {
       // The middle is the dot between the identifiers
       const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
 
