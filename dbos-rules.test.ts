@@ -289,7 +289,7 @@ const testSet: TestSet = [
         ctxt.client.raw((5).toString()); // And this fails like usual
 
         const foo = 5; // Testing numeric literals! Just thrown in here.
-        ctxt.client.raw(5 + foo * 500 * foo);
+        ctxt.client.raw((5 + foo * 500 * foo).toString());
       `,
         Array(4).fill("sqlInjection")
       ),
