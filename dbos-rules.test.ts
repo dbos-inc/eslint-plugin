@@ -74,25 +74,20 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     class UserDatabaseClient {}
 
     class Knex {
-      raw(...x: any[]) {}
+      raw(query: string, ...bindings: any[]) {}
     }
 
     class PrismaClient {
-      $queryRawUnsafe(...x: any[]) {}
-      $executeRawUnsafe(...x: any[]) {}
+      $queryRawUnsafe(query: string, ...values: any[]) {}
+      $executeRawUnsafe(query: string, ...values: any[]) {}
     }
 
     class PoolClient {
-      query(...x: any[]) {}
-      queryWithClient(client: any, ...x: any[]) {}
+      query(query: string, ...values: any[]) {}
     }
 
     class TypeORMEntityManager {
-      query(...x: any[]) {}
-    }
-
-    class UserDatabase {
-      query(...x: any[]) {}
+      query<T extends unknown[]>(query: string, parameters?: T) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
@@ -139,8 +134,6 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[], s
 
 //////////
 
-/* TODO: perhaps make some test helper functions to make that better, or split tests into more files
-(core goal: isolate what each test tests for), and that might also make them somewhat easier to read */
 const testSet: TestSet = [
   /* Note: the tests for SQL injection do not involve any actual SQL code;
   they just test for any non-LR-values being passed to a raw SQL query callsite.
@@ -363,12 +356,12 @@ const testSet: TestSet = [
         "TypeORMEntityManager"
       ),
 
-      // Failure test #9 (testing `UserDatabase`, and not not using `TransactionContext`)
+      // Failure test #9 (testing not using `TransactionContext`)
       makeSqlInjectionFailureTest(`
-        const userDb = {} as UserDatabase;
-        userDb.query("foo" + (5).toString());
+        console.log("Foo");
+        ctxt;
         `,
-        ["transactionDoesntUseTheDatabase", "sqlInjection"]
+        Array(1).fill("transactionDoesntUseTheDatabase")
       )
     ]
   ],

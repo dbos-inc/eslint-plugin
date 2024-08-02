@@ -41,12 +41,10 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 
 // This maps the ORM client name to a list of raw SQL query calls to check
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
-  // TODO: support `queryWithClient` later for `PoolClient` and `UserDatabase`
   ["PoolClient", ["query"]],
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
   ["TypeORMEntityManager", ["query"]],
-  ["Knex", ["raw"]],
-  ["UserDatabase", ["query"]]
+  ["Knex", ["raw"]]
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -95,7 +93,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   // The keys are the ids, and the values are the messages themselves
   return new Map([
     ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'"],
-    ["transactionDoesntUseTheDatabase", "A transaction should always use the database; otherwise, it is just wasting time"],
+    ["transactionDoesntUseTheDatabase", "This transaction does not use the database (via its `client` field). Consider using a communicator or a normal function"],
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -514,9 +512,13 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 }
 
-// If it's a raw SQL injection callsite, then this returns the arguments to examine
-function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]> {
+// If it's a raw SQL injection callsite, then this returns the argument to examine
+function maybeGetArgFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node> {
   const callExprWithoutParams = callExpr.getExpression();
+  const args = callExpr.getArguments();
+
+  // Need the first argument, which is the query string
+  if (args.length === 0) return;
 
   // `client.<callName>`, or `ctxt.client.<callName>`, and so on with the prefixes
   const identifiers = callExprWithoutParams.getDescendantsOfKind(SyntaxKind.Identifier);
@@ -525,27 +527,29 @@ function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]>
   if (identifierTypeNames.length < 2) return; // Can't recognize a raw SQL call for 0 or 1 identifiers
 
   const expectedClient = identifierTypeNames[identifierTypeNames.length - 2];
-  const info = ormClientInfoForRawSqlQueries.get(expectedClient);
-  if (info === Nothing) return;
+  const callNames = ormClientInfoForRawSqlQueries.get(expectedClient);
+  if (callNames === Nothing) return;
 
   const expectedRawQueryCall = identifiers[identifiers.length - 1].getText();
-  if (info.includes(expectedRawQueryCall)) return callExpr.getArguments();
+
+  if (callNames.includes(expectedRawQueryCall)) {
+    return args[0];
+  }
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, isLocal) => {
   if (Node.isCallExpression(node)) {
-    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
+    const maybeArg = maybeGetArgFromRawSqlCallSite(node);
 
-    // Just checking the first argument
-    if (maybeArgs !== Nothing && maybeArgs.length !== 0) {
-      return checkCallForInjection(maybeArgs[0], fnDecl, isLocal);
+    if (maybeArg !== Nothing) {
+      return checkCallForInjection(maybeArg, fnDecl, isLocal);
     }
   }
 };
 
 ////////// This code is for detecting useless transactions
 
-// Note: this may result in false negatives for nested closures that capture the transaction context.
+// Note: this may result in false negatives for nested closures that capture the transaction context's client.
 const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (node !== fnDecl) return; // Only analyze the whole function
 
@@ -560,9 +564,14 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
   let foundDatabaseUsage = false;
 
   fnDecl.getBody()!.forEachDescendant((descendant, traversalControl) => {
-    if (transactionContextSymbol === getSymbol(descendant)) {
-      foundDatabaseUsage = true;
-      traversalControl.stop();
+    if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() === 3) {
+      // The middle is the dot between the identifiers
+      const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
+
+      if (getSymbol(left) == transactionContextSymbol && right.getText() === "client") {
+        foundDatabaseUsage = true;
+        traversalControl.stop();
+      }
     }
   });
 
