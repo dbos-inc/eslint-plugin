@@ -357,8 +357,13 @@ const testSet: TestSet = [
       makeSqlInjectionFailureTest(`
         console.log("Foo");
         ctxt;
+
+        class Other {
+          @Transaction()
+          foo(ctxt: TransactionContext) {}
+        }
         `,
-        Array(1).fill("transactionDoesntUseTheDatabase")
+        Array(2).fill("transactionDoesntUseTheDatabase")
       )
     ]
   ],
