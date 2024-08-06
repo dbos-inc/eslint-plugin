@@ -579,9 +579,8 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
       }
     }
     else if (Node.isCallExpression(descendant)) {
-      // If you call a helper function with the context as a parameter (TODO: maybe only allow calling other transactions?)
       if (descendant.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
-        stopTraversalOnSuccess(); // TODO: perhaps also support passing in `ctxt.client`
+        stopTraversalOnSuccess(); // TODO: perhaps also support passing in `ctxt.client`, and maybe only allow calling other transactions
       }
     }
   });
