@@ -169,7 +169,7 @@ function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
 function reduceNodeToLeftmostLeaf(node: Node): Node {
- while (true) {
+  while (true) {
     // For parenthesized expressions, we don't want the leftmost parenthesis
     if (Node.isParenthesizedExpression(node)) {
       node = unpackParenthesizedExpression(node);
@@ -549,7 +549,8 @@ const isSqlInjection: ErrorChecker = (node, fnDecl, isLocal) => {
 
 ////////// This code is for detecting useless transactions
 
-// Note: this may result in false negatives for nested closures that capture the transaction context's client.
+/* Note: this may result in false negatives for nested closures that capture the transaction context's client,
+and when you call helper functions that you pass the context object to, but that helper function does nothing. */
 const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) => {
   if (node !== fnDecl) return; // Only analyze the whole function
 
@@ -564,13 +565,23 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
   let foundDatabaseUsage = false;
 
   fnDecl.getBody()!.forEachDescendant((descendant, traversalControl) => {
+    const stopTraversalOnSuccess = () => {
+      foundDatabaseUsage = true;
+      traversalControl.stop();
+    };
+
     if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() >= 3) {
       // The middle is the dot between the identifiers
       const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
 
       if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
-        foundDatabaseUsage = true;
-        traversalControl.stop();
+        stopTraversalOnSuccess();
+      }
+    }
+    else if (Node.isCallExpression(descendant)) {
+      // If you call a helper function with the context as a parameter (TODO: maybe only allow calling other transactions?)
+      if (descendant.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
+        stopTraversalOnSuccess();
       }
     }
   });
