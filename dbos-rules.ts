@@ -476,7 +476,7 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
         }
         else {
           // Not handling other variants currently (there are a couple of others)
-          return true;
+          return false;
         }
       });
     }
