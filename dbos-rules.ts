@@ -12,10 +12,6 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 
-// Should I find TypeScript variants of these?
-const secPlugin = require("eslint-plugin-security");
-const noSecrets = require("eslint-plugin-no-secrets");
-
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
 ////////// These are some shared types
@@ -45,12 +41,10 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 
 // This maps the ORM client name to a list of raw SQL query calls to check
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
-  // TODO: support `queryWithClient` later for `PoolClient` and `UserDatabase`
   ["PoolClient", ["query"]],
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
   ["TypeORMEntityManager", ["query"]],
-  ["Knex", ["raw"]],
-  ["UserDatabase", ["query"]]
+  ["Knex", ["raw"]]
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -99,6 +93,7 @@ Also, some `bcrypt` functions generate random data and should only be called fro
   // The keys are the ids, and the values are the messages themselves
   return new Map([
     ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'"],
+    ["transactionDoesntUseTheDatabase", "This transaction does not use the database (via its `client` field). Consider using a communicator or a normal function"],
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -145,32 +140,22 @@ TODO (requests from others, and general things for me to do):
 From me:
 - Run this over `dbos-transact`
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
-- Should I check more functions for SQL injection, if non-transactions are allowed to run raw queries?
 - Mark some simple function calls as being constant (this could quickly spiral in terms of complexity)
 */
 
-////////// This is some meta package info
-
-const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
-const packageJsonInfo = readJSON(path.join(__dirname, packageJsonPrefix, "package.json"));
-
 ////////// These are some utility functions
-
-function readJSON(path: string): any {
-  return JSON.parse(fs.readFileSync(path, "utf8"));
-}
 
 function panic(message: string): never {
   throw new Error(message);
 }
 
 // This function exists so that I can make sure that my tests are reading valid symbols
-function getSymbol(node: Node | Type): Maybe<Symbol> {
-  const symbol = node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
+function getSymbol(nodeOrType: Node | Type): Maybe<Symbol> {
+  const symbol = nodeOrType.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
 
   if (testingValidityOfTestsLocally && symbol === Nothing) {
-    const name = node instanceof Type ? "type" : "node";
-    panic(`Expected a symbol for this ${name}: '${node.getText()}'`);
+    const name = nodeOrType instanceof Type ? "type" : "node";
+    panic(`Expected a symbol for this ${name}: '${nodeOrType.getText()}'`);
   }
 
   return symbol;
@@ -184,7 +169,7 @@ function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
 function reduceNodeToLeftmostLeaf(node: Node): Node {
- while (true) {
+  while (true) {
     // For parenthesized expressions, we don't want the leftmost parenthesis
     if (Node.isParenthesizedExpression(node)) {
       node = unpackParenthesizedExpression(node);
@@ -221,7 +206,7 @@ function getLAndRValuesIfAssignment(node: Node): Maybe<[Identifier, Expression]>
       if (Node.isIdentifier(lhs)) return [lhs, node.getRight()];
     }
   }
-}
+};
 
 ////////// These functions are the determinism heuristics that I've written
 
@@ -236,12 +221,10 @@ const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
     return "globalMutation";
   }
 
-  /*
-  Note that `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` both work,
+  /* Note that `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` both work,
   along with variable swaps in the style of `b = [a, a = b][0]`.
-  TODO: catch spread assignments like this one: `[a, b] = [b, a]`.
-  */
-}
+  TODO: catch spread assignments like this one: `[a, b] = [b, a]`. */
+};
 
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
@@ -265,11 +248,12 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
       }
     }
   }
-}
+};
 
 // TODO: match against `.then` as well (with a promise object preceding it)
 const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
-  // If the valid type set and arg type set intersect, then there's a valid type in the args
+
+  // If the valid type set and arg type set intersect, then there's a valid type in the args.
   function validTypeExistsInFunctionCallParams(functionCall: CallExpression, validTypes: Set<string>): boolean {
     // I'd like to use `isDisjointFrom` here, but it doesn't seem to be available, for some reason
     const argTypes = functionCall.getArguments().map(getTypeNameForTsMorphNode);
@@ -310,7 +294,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
       return "awaitingOnNotAllowedType";
     }
   }
-}
+};
 
 ////////// This code is for detecting SQL injections
 
@@ -320,7 +304,9 @@ function getNodePosInFile(node: Node): {line: number, column: number} {
 
 // This checks if a variable was used before it was declared; if so, there's a hoisting issue, and skip the declaration.
 function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDeclaration): boolean {
-  const declKind = decl.getVariableStatement()?.getDeclarationKind() ?? panic("When would a variable statement ever not be defined?");
+  const variableStatement = decl.getVariableStatement();
+  if (variableStatement === undefined) return true; // This should ideally never happen
+  const declKind = variableStatement.getDeclarationKind();
 
   // If a variable was declared with `var`, then it can be used before it's declared (damn you, Brendan Eich!)
   if (declKind === VariableDeclarationKind.Var) return true;
@@ -333,7 +319,8 @@ function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDecla
   return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
 }
 
-// This function scans the scope to checkbody, and finds all things assigned to the given identifier (excluding the one passed in). A thing is either an rvalue expression or a function parameter.
+/* This function scans the scope to check, and finds all things assigned to the given identifier
+(excluding the one passed in). A 'thing' is either an rvalue expression or a function parameter. */
 function* getAssignmentsToIdentifier(scopeToCheck: Node, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
   for (const child of scopeToCheck.getChildren()) { // Could I iterate through here without allocating the children?
     yield* getAssignmentsToIdentifier(child, identifier);
@@ -377,16 +364,17 @@ function* getAssignmentsToIdentifier(scopeToCheck: Node, identifier: Identifier)
 
 function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean): Maybe<ErrorMessageIdWithFormatData> {
   /*
-  A literal-reducible value is either a literal string/number, or a variable that reduces down to a literal string/number. Acronym: LR.
-  I'm just mentioning numbers here since the core allowed value is a string or number literal (but the main query parameter is a string).
+  A literal-reducible value is either a literal value, or a variable that reduces down to a literal value.
+  Some examples of literal values would be literal strings, literal numbers, bigints, enums, etc. Acronym: LR.
+  The main query parameter is implicitly assumed to be a string, though.
 
   Here's what's allowed for SQL string parameters (from a supported callsite):
     1. LR
     2. LRs concatenated with other LRs
     3. Variables that reduce down to LRs concatenated with other LRSs
 
-  A literal-reducible value is not flagged for SQL injection, since injection would typically
-  happen in a case where you take some other non-literal-string datatype, cast it to a string,
+  A LR-value is not flagged for SQL injection, since injection would typically
+  happen in a case where you take some other non-literal datatype, cast it to a string,
   and then concatenate that with a SQL query string. As long as the final value passed to the
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
@@ -400,8 +388,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   for the sake of efficiency: it's just so that reference cycles won't result
   in infinite recursion.
 
-  Also note that errors may be falsely reported if you first use a string for a raw query,
-  and then assign that query to a non-LR value. In most cases, that post-assigned value will
+  Also note that errors may be falsely reported if you first make a raw query string, use that in a query,
+  and then assign that string to a non-LR value after. In most cases, that post-assigned value will
   not affect the query, but if you are in a loop and the query string is defined in an outer
   scope, the next loop iteration may then receive that non-LR value, which would qualify as a SQL injection.
 
@@ -437,8 +425,9 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 
   function isLRWithoutStateCache(node: Node): boolean {
-    // Note: a no-substitution template literal might be something like `foo` (as compared to `foo${bar}`
-    if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node) || Node.isNumericLiteral(node)) {
+    /* The `isLiteral` here does not cover all literal types; it only does booleans,
+    bigints, enums, numbers, and strings (and no-substitution template literals), I think. */
+    if (node.getType().isLiteral() || Node.isNullLiteral(node) || Node.isFunctionExpression(node) || Node.isArrowFunction(node)) {
       return true;
     }
     /* i.e. if it's a format string (like `${foo} ${bar} ${baz}`).
@@ -472,6 +461,25 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
     else if (Node.isParenthesizedExpression(node)) {
       return isLR(unpackParenthesizedExpression(node));
     }
+    else if (Node.isArrayLiteralExpression(node)) {
+      return node.getElements().every(isLR);
+    }
+    else if (Node.isConditionalExpression(node)) {
+      return isLR(node.getWhenTrue()) && isLR(node.getWhenFalse());
+    }
+    else if (Node.isObjectLiteralExpression(node)) {
+      return node.getProperties().every((property) => {
+
+        if (Node.isPropertyAssignment(property)) {
+          const maybeInitializer = property.getInitializer();
+          return maybeInitializer !== Nothing && isLR(maybeInitializer);
+        }
+        else {
+          // Not handling other variants currently (there are a couple of others)
+          return false;
+        }
+      });
+    }
     else {
       rootProblemNodes.add(node);
       return false;
@@ -504,9 +512,13 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 }
 
-// If it's a raw SQL injection callsite, then this returns the arguments to examine
-function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]> {
+// If it's a raw SQL injection callsite, then this returns the argument to examine
+function maybeGetArgFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node> {
   const callExprWithoutParams = callExpr.getExpression();
+  const args = callExpr.getArguments();
+
+  // Need the first argument, which is the query string
+  if (args.length === 0) return;
 
   // `client.<callName>`, or `ctxt.client.<callName>`, and so on with the prefixes
   const identifiers = callExprWithoutParams.getDescendantsOfKind(SyntaxKind.Identifier);
@@ -515,33 +527,98 @@ function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]>
   if (identifierTypeNames.length < 2) return; // Can't recognize a raw SQL call for 0 or 1 identifiers
 
   const expectedClient = identifierTypeNames[identifierTypeNames.length - 2];
-  const info = ormClientInfoForRawSqlQueries.get(expectedClient);
-  if (info === Nothing) return;
+  const callNames = ormClientInfoForRawSqlQueries.get(expectedClient);
+  if (callNames === Nothing) return;
 
   const expectedRawQueryCall = identifiers[identifiers.length - 1].getText();
-  if (info.includes(expectedRawQueryCall)) return callExpr.getArguments();
+
+  if (callNames.includes(expectedRawQueryCall)) {
+    return args[0];
+  }
 }
 
 const isSqlInjection: ErrorChecker = (node, fnDecl, isLocal) => {
   if (Node.isCallExpression(node)) {
-    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
+    const maybeArg = maybeGetArgFromRawSqlCallSite(node);
 
-    // Just checking the first argument
-    if (maybeArgs !== Nothing && maybeArgs.length !== 0) {
-      return checkCallForInjection(maybeArgs[0], fnDecl, isLocal);
+    if (maybeArg !== Nothing) {
+      return checkCallForInjection(maybeArg, fnDecl, isLocal);
     }
   }
-}
+};
+
+////////// This code is for detecting useless transactions
+
+/* Note: this may result in false negatives for nested closures that capture the transaction context's client,
+and when you call helper functions that you pass the context object to, but that helper function does nothing. */
+const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) => {
+  if (node !== fnDecl) return; // Only analyze the whole function
+
+  const params = fnDecl.getParameters();
+  if (params.length === 0) return; // In this case, not a valid transaction
+
+  const transactionContextSymbol = getSymbol(params[0]); // The first param should be the transaction context
+  if (transactionContextSymbol === Nothing) return; // No symbol for the first param -> should not analyze
+
+  //////////
+
+  let foundDatabaseUsage = false;
+
+  fnDecl.getBody()!.forEachDescendant((descendant, traversalControl) => {
+    const stopTraversalOnSuccess = () => {
+      foundDatabaseUsage = true;
+      traversalControl.stop();
+    };
+
+    if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() >= 3) {
+      // The middle is the dot between the identifiers
+      const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
+
+      if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
+        stopTraversalOnSuccess();
+      }
+    }
+    else if (Node.isCallExpression(descendant)) {
+      /* If the transaction context is passed as an argument to a function, then stop the traversal.
+      No check is done to see if `ctxt.client` is passed in, since if the client is accessed, that would
+      be caught by the first branch above. TODO: perhaps only support calling other transactions for this argument
+      here (this would then ensure that overall, every transaction context client is always used). */
+      if (descendant.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
+        stopTraversalOnSuccess();
+      }
+    }
+  });
+
+  if (!foundDatabaseUsage) return "transactionDoesntUseTheDatabase";
+};
 
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-/* Note: a workflow can never be a transaction, so no need to worry about overlap here.
-Also, note: checking all functions for SQL injection, since oftentimes, functions will do
-transactions without the decorator. */
+/*
+First field: a set of method decorators to match on (if `Nothing`, then match on everything).
+Second field: a list of error checkers to run.
+*/
 const decoratorSetErrorCheckerMapping: [Maybe<Set<string>>, ErrorChecker[]][] = [
-  [Nothing, [isSqlInjection]], // Checking for SQL injection here
+  [Nothing, [isSqlInjection]], // Checking for SQL injection here (all functions)
+  [new Set(["Transaction"]), [transactionDoesntUseTheDatabase]], // Checking for useless transactions here
   [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]] // Checking for nondeterminism here
 ];
+
+function runErrorCheckers(node: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean) {
+  for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
+    if ((decoratorSet === Nothing || functionHasDecoratorInSet(fnDecl, decoratorSet))) {
+
+      for (const errorChecker of errorCheckers) {
+        const response = errorChecker(node, fnDecl, isLocal);
+
+        if (response !== Nothing) {
+          const [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
+          GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
+        }
+      }
+    }
+  }
+}
 
 function analyzeFunction(fnDecl: FnDecl) {
   // A function declaration without a body: `declare function myFunction();`
@@ -573,18 +650,10 @@ function analyzeFunction(fnDecl: FnDecl) {
   const isLocal = (symbol: Symbol) => stack.has(symbol);
   */
 
-  function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
-    const response = errorChecker(node, fnDecl, isLocal);
-
-    if (response !== Nothing) {
-      const [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
-      GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
-    }
-  }
+  // Run the error checkers over the fn decl itself as well
+  runErrorCheckers(fnDecl, fnDecl, isLocal);
 
   function analyzeFrame(node: Node) {
-    const locals = getCurrentFrame();
-
     if (Node.isClassDeclaration(node)) {
       analyzeClass(node);
       return;
@@ -605,14 +674,10 @@ function analyzeFunction(fnDecl: FnDecl) {
     // Note: parameters are not considered to be locals here (mutating them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
       const symbol = getSymbol(node);
-      if (symbol !== Nothing) locals.add(symbol);
+      if (symbol !== Nothing) getCurrentFrame().add(symbol);
     }
     else {
-      for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
-        if (decoratorSet === Nothing || functionHasDecoratorInSet(fnDecl, decoratorSet)) {
-          errorCheckers.forEach((errorChecker) => runErrorChecker(errorChecker, node));
-        }
-      }
+      runErrorCheckers(node, fnDecl, isLocal);
     }
 
     node.forEachChild(analyzeFrame);
@@ -777,12 +842,16 @@ export const dbosStaticAnalysisRule = createRule({
   meta: {
     schema: [],
     type: "suggestion",
-    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
+    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking, SQL injection detection, etc..." },
     messages: Object.fromEntries(errorMessages)
   },
 
   defaultOptions: []
 });
+
+const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
+const packageJsonPath = path.join(__dirname, packageJsonPrefix, "package.json");
+const packageJsonInfo = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
 module.exports = {
   meta: {
@@ -794,8 +863,10 @@ module.exports = {
 
   plugins: {
     "@typescript-eslint": tslintPlugin,
-    "security": secPlugin,
-    "no-secrets": noSecrets
+
+    // Should I find TypeScript variants of these?
+    "security": require("eslint-plugin-security"),
+    "no-secrets": require("eslint-plugin-no-secrets")
   },
 
   configs: {

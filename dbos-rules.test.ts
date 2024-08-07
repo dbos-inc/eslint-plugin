@@ -74,25 +74,20 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     class UserDatabaseClient {}
 
     class Knex {
-      raw(...x: any[]) {}
+      raw(query: string, ...bindings: any[]) {}
     }
 
     class PrismaClient {
-      $queryRawUnsafe(...x: any[]) {}
-      $executeRawUnsafe(...x: any[]) {}
+      $queryRawUnsafe(query: string, ...values: any[]) {}
+      $executeRawUnsafe(query: string, ...values: any[]) {}
     }
 
     class PoolClient {
-      query(...x: any[]) {}
-      queryWithClient(client: any, ...x: any[]) {}
+      query(query: string, ...values: any[]) {}
     }
 
     class TypeORMEntityManager {
-      query(...x: any[]) {}
-    }
-
-    class UserDatabase {
-      query(...x: any[]) {}
+      query<T extends unknown[]>(query: string, parameters?: T) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
@@ -139,13 +134,10 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[], s
 
 //////////
 
-/* TODO: perhaps make some test helper functions to make that better, or split tests into more files
-(core goal: isolate what each test tests for), and that might also make them somewhat easier to read */
 const testSet: TestSet = [
-  /* Note: the tests for SQL injection do not
-  involve any actual SQL code; they just test
-  for any non-LR-strings being passed to a raw SQL query callsite.
-  You can find more info on LR-strings in `dbos-rules.ts`. */
+  /* Note: the tests for SQL injection do not involve any actual SQL code;
+  they just test for any non-LR-values being passed to a raw SQL query callsite.
+  You can find more info on LR-values in `dbos-rules.ts`. */
 
   ["sql injection",
     [
@@ -168,11 +160,11 @@ const testSet: TestSet = [
         ctxt.client.raw(foo + foo + bar + foo);
       `),
 
-      // Success test #2 (deep variable tracing)
+      // Success test #2 (deep variable tracing, along with some literal type concatenation)
       makeSqlInjectionSuccessTest(`
         let w, x, y, z, å = "ghi";
 
-        w = "abc" + "def" + å;
+        w = "abc" + "def" + å + 503n + 504 + true + false + undefined + null + {} + {a: 3} + function() {} + (() => {}) + [1];
         x = w;
         y = x;
         z = y;
@@ -295,9 +287,6 @@ const testSet: TestSet = [
         ctxt.client.raw(aParam);
         ctxt.client.raw(aParam + (5).toString()); // This fails for two reasons (but only shows one)
         ctxt.client.raw((5).toString()); // And this fails like usual
-
-        const foo = 5; // Testing numeric literals! Just thrown in here.
-        ctxt.client.raw(5 + foo * 500 * foo);
       `,
         Array(4).fill("sqlInjection")
       ),
@@ -364,12 +353,17 @@ const testSet: TestSet = [
         "TypeORMEntityManager"
       ),
 
-      // Failure test #9 (testing `UserDatabase`)
+      // Failure test #9 (testing not using `TransactionContext`)
       makeSqlInjectionFailureTest(`
-        const userDb = {} as UserDatabase;
-        userDb.query("foo" + (5).toString());
+        console.log("Foo");
+        ctxt;
+
+        class Other {
+          @Transaction()
+          foo(ctxt: TransactionContext) {}
+        }
         `,
-        Array(1).fill("sqlInjection")
+        Array(2).fill("transactionDoesntUseTheDatabase")
       )
     ]
   ],

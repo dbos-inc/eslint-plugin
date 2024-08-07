@@ -16,7 +16,7 @@ directories=(
   e-commerce/shop-backend
   e-commerce/shop-frontend
 
-  greeting-emails
+  greeting-guestbook
   shop-guide
   tpcc
   widget-fulfillment
