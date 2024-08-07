@@ -39,6 +39,7 @@ transact_directories=(
   packages/create/templates/hello
   packages/create/templates/hello-prisma
   packages/create/templates/hello-typeorm
+  packages/create/templates/hello-drizzle
 )
 
 declare -A repos_with_upgradeable_directories=(
