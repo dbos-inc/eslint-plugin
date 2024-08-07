@@ -579,8 +579,12 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
       }
     }
     else if (Node.isCallExpression(descendant)) {
+      /* If the transaction context is passed as an argument to a function, then stop the traversal.
+      No check is done to see if `ctxt.client` is passed in, since if the client is accessed, that would
+      be caught by the first branch above. TODO: perhaps only support calling other transactions for this argument
+      here (this would then ensure that overall, every transaction context client is always used). */
       if (descendant.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
-        stopTraversalOnSuccess(); // TODO: perhaps also support passing in `ctxt.client`, and maybe only allow calling other transactions
+        stopTraversalOnSuccess();
       }
     }
   });
