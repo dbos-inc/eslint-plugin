@@ -81,15 +81,13 @@ upgrade_repo() {
   repo_name="$1"
   log "Begin process of upgrading repo '$repo_name'"
 
-  # First, clone the repo if it doesn't exist, or pull the latest changes if it does.
   if [[ -d "$repo_name" ]]; then
-    cd "$repo_name"
-    git restore . # Removing any changes made
-    # git pull # Pulling the latest changes
+    echo "This repo should be cleaned up: '$repo_name'"
   else
     git clone "git@github.com:dbos-inc/$repo_name.git"
-    cd "$repo_name"
   fi
+
+  cd "$repo_name"
 
   ##########
 
