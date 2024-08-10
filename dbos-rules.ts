@@ -408,8 +408,8 @@ function* getAssignmentsToLValue(allowedLValue: AllowedLValue): Generator<Node |
 
     /* If we have nested property access (e.g. `a.b.c.d`, as compared to `a.b`),
     reduce that down to `a.b`. This will sometimes yield false positives though. */
-    const firstDot = allowedLValue.getFirstDescendantByKindOrThrow(SyntaxKind.DotToken, "Expected a dot token");
-    const firstPropertyAccess = firstDot.getParentOrThrow("Expected a parent to the dot token");
+    const firstDot = allowedLValue.getFirstDescendantByKindOrThrow(SyntaxKind.DotToken, "Expected a dot token!");
+    const firstPropertyAccess = firstDot.getParentOrThrow("Expected a parent to the dot token!");
     const leftmostObject = firstPropertyAccess.getChildAtIndex(0), firstPropField = firstPropertyAccess.getChildAtIndex(2);
 
     yield* implGetAssignmentsToLValue(leftmostObject, (rhsAssignment) => {
@@ -663,38 +663,35 @@ const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) =
   const params = fnDecl.getParameters();
   if (params.length === 0) return; // In this case, not a valid transaction
 
-  const transactionContextSymbol = getSymbol(params[0]); // The first param should be the transaction context
+  const transactionContext = params[0];
+  const transactionContextSymbol = getSymbol(transactionContext); // The first param should be the transaction context
   if (transactionContextSymbol === Nothing) return; // No symbol for the first param -> should not analyze
-
-  //////////
 
   let foundDatabaseUsage = false;
 
-  // TODO: use the global ref info for this instead
-  fnDecl.getBody()!.forEachDescendant((descendant, traversalControl) => {
-    const stopTraversalOnSuccess = () => {
-      foundDatabaseUsage = true;
-      traversalControl.stop();
-    };
+  for (const ref of getRefsToNodeOrSymbol(transactionContextSymbol)) {
+    if (ref === transactionContext) continue;
 
-    if (Node.isPropertyAccessExpression(descendant) && descendant.getChildCount() >= 3) {
-      // The middle is the dot between the identifiers
-      const left = descendant.getChildAtIndex(0), right = descendant.getChildAtIndex(2);
+    const parent = ref.getParentOrThrow("Expected a parent node to exist!");
+
+    if (Node.isPropertyAccessExpression(parent) && parent.getChildCount() >= 3) {
+      const left = parent.getChildAtIndex(0), right = parent.getChildAtIndex(2);
 
       if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
-        stopTraversalOnSuccess();
+        foundDatabaseUsage = true;
+        break;
       }
     }
-    else if (Node.isCallExpression(descendant)) {
-      /* If the transaction context is passed as an argument to a function, then stop the traversal.
-      No check is done to see if `ctxt.client` is passed in, since if the client is accessed, that would
-      be caught by the first branch above. TODO: perhaps only support calling other transactions for this
-      argument here (this would then ensure that overall, every transaction context client is always used). */
-      if (descendant.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
-        stopTraversalOnSuccess();
+    else {
+      const parentCall = ref.getFirstAncestorByKind(SyntaxKind.CallExpression);
+      if (parentCall === Nothing) continue;
+
+      if (parentCall.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
+        foundDatabaseUsage = true;
+        break;
       }
     }
-  });
+  }
 
   if (!foundDatabaseUsage) return "transactionDoesntUseTheDatabase";
 };

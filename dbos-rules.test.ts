@@ -358,11 +358,10 @@ const testSet: TestSet = [
 
       // Failure test #9 (testing not using `TransactionContext`)
       makeSqlInjectionFailureTest(`
-        console.log("Foo");
         ctxt;
 
         class Other {
-          @Transaction()
+          @Transaction() // This one does not use 'ctxt'
           foo(ctxt: TransactionContext<Knex>) {}
         }
 
@@ -386,6 +385,7 @@ const testSet: TestSet = [
           }
         };
 
+        // But this one does
         ctxt.client.raw(bob.baz2);
         `,
         Array(1).fill("transactionDoesntUseTheDatabase")
