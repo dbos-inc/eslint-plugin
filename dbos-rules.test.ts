@@ -244,6 +244,7 @@ const testSet: TestSet = [
         ctxt.client.raw(\`foo\`);
       `)
     ],
+
     [
       // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
@@ -360,10 +361,124 @@ const testSet: TestSet = [
 
         class Other {
           @Transaction()
-          foo(ctxt: TransactionContext) {}
+          foo(ctxt: TransactionContext<Knex>) {}
         }
+
+        const stuff = [1, 2, 3];
+        stuff[1] %= 30;
+
+        const x = "foo";
+
+        const bob = {
+          foo: 5,
+          bar: 6,
+          baz: stuff,
+
+          get thing() {
+            return this.foo;
+          },
+
+          otherThing() {
+            console.log("Hello");
+          }
+        };
+
+        ctxt.client.raw(bob);
         `,
-        Array(2).fill("transactionDoesntUseTheDatabase")
+        Array(1).fill("transactionDoesntUseTheDatabase")
+      ),
+
+      // Failure test #10 (a simpler object test)
+      makeSqlInjectionFailureTest(`
+        // Case 1: declaring an object with a non-LR field
+        const foo = {a: (5).toString()};
+        ctxt.client.raw(foo.a); // Failure
+
+        // Case 2: reassigning an object with a non-LR field
+        let bar = {a: "initial"};
+        bar = {a: (7).toString()};
+        ctxt.client.raw(bar.a); // Failure
+
+        // Case 3: assining one field of an object with a non-LR field
+        const baz = {a: "initial"};
+        baz.a = (6).toString();
+        ctxt.client.raw(baz.a); // Failure
+        ctxt.client.raw(baz); // Failure
+        `,
+        Array(4).fill("sqlInjection")
+      ),
+
+      // Failure test #11 (a more complex object test)
+      makeSqlInjectionFailureTest(`
+        // This stuff should fail
+        const x = {y: "literal", z: {a: (30).toString()}};
+        const z = x.z;
+        const a = {b: z + x.y};
+        const c = {d: a.b};
+        ctxt.client.raw(c.d); // Failure
+
+        // This stuff should succeed
+        const xx = {yy: "literal", zz: {a: (40).toString()}};
+        const zz = xx.yy;
+        const aa = {bb: zz + xx.yy};
+        const cc = {dd: aa.bb};
+        ctxt.client.raw(cc.dd); // Success
+        `,
+        Array(1).fill("sqlInjection")
+      ),
+
+      // Failure test #12 (testing shorthand property assignment)
+      makeSqlInjectionFailureTest(`
+        const b = [(5).toString()];
+        const a = {b, c: "literal"};
+        ctxt.client.raw(a); // Failure
+        ctxt.client.raw(a.b); // Failure
+        ctxt.client.raw(a.c); // Success
+        `,
+        Array(2).fill("sqlInjection")
+      ),
+
+      // Failure test #13 (testing element array accesses)
+      makeSqlInjectionFailureTest(`
+        const foo = [1, 2, (5).toString()];
+        ctxt.client.raw(foo); // Failure
+        ctxt.client.raw(foo[0]); // Failure
+
+        let bar = ["a", "b", "c"];
+        bar = [2, 3, 4];
+        bar[0] = "hallo";
+        bar = {a: 1, b: 2, c: (6).toString()};
+        ctxt.client.raw(bar[0]); // Failure
+        `,
+        Array(3).fill("sqlInjection")
+      ),
+
+      // Failure test #14 (testing nested object and array accesses, along with arbitrary parenthetical placements)
+      makeSqlInjectionFailureTest(`
+        const nested = {a: {b: {c: (20).toString(), d: "literal"}}, e: 50};
+
+        ctxt.client.raw(nested.a.e); // Succeeds
+        ctxt.client.raw(nested.a.e.foo()); // Fails
+        ctxt.client.raw(nested.a.b.c); // Fails (reduces down to a.b (this is an implementation limitation), and then fails)
+        ctxt.client.raw(nested["a"]); // Fails
+        ctxt.client.raw(nested["a"]["b"]); // Fails
+        ctxt.client.raw((nested["a"])["b"]); // Fails
+        ctxt.client.raw((nested)["a"]["b"]); // Fails
+        ctxt.client.raw((nested["a"]["b"])); // Fails
+        `,
+        Array(8).fill("sqlInjection")
+      ),
+
+      // Failure test #15 (testing object access with leftmost non-allowed-lvalues)
+      makeSqlInjectionFailureTest(`
+        function fooFn(): any {
+          return undefined;
+        }
+
+        ctxt.client.raw(fooFn().a); // Failure
+        ctxt.client.raw(this.a); // Failure
+        `,
+        Array(2).fill("sqlInjection")
       )
     ]
   ],
