@@ -74,25 +74,20 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     class UserDatabaseClient {}
 
     class Knex {
-      raw(...x: any[]) {}
+      raw(query: string, ...bindings: any[]) {}
     }
 
     class PrismaClient {
-      $queryRawUnsafe(...x: any[]) {}
-      $executeRawUnsafe(...x: any[]) {}
+      $queryRawUnsafe(query: string, ...values: any[]) {}
+      $executeRawUnsafe(query: string, ...values: any[]) {}
     }
 
     class PoolClient {
-      query(...x: any[]) {}
-      queryWithClient(client: any, ...x: any[]) {}
+      query(query: string, ...values: any[]) {}
     }
 
     class TypeORMEntityManager {
-      query(...x: any[]) {}
-    }
-
-    class UserDatabase {
-      query(...x: any[]) {}
+      query<T extends unknown[]>(query: string, parameters?: T) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
@@ -104,6 +99,8 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     }
 
     class SqlInjectionTestClass {
+      aFieldInTheClass: string;
+
       @Transaction()
       injectionTestMethod(ctxt: TransactionContext<${sqlClient}>, aParam: string) {
         ${code}
@@ -139,13 +136,10 @@ function makeSqlInjectionFailureTest(code: string, expectedErrorIds: string[], s
 
 //////////
 
-/* TODO: perhaps make some test helper functions to make that better, or split tests into more files
-(core goal: isolate what each test tests for), and that might also make them somewhat easier to read */
 const testSet: TestSet = [
-  /* Note: the tests for SQL injection do not
-  involve any actual SQL code; they just test
-  for any non-LR-strings being passed to a raw SQL query callsite.
-  You can find more info on LR-strings in `dbos-rules.ts`. */
+  /* Note: the tests for SQL injection do not involve any actual SQL code;
+  they just test for any non-LR-values being passed to a raw SQL query callsite.
+  You can find more info on LR-values in `dbos-rules.ts`. */
 
   ["sql injection",
     [
@@ -168,11 +162,11 @@ const testSet: TestSet = [
         ctxt.client.raw(foo + foo + bar + foo);
       `),
 
-      // Success test #2 (deep variable tracing)
+      // Success test #2 (deep variable tracing, along with some literal type concatenation)
       makeSqlInjectionSuccessTest(`
         let w, x, y, z, å = "ghi";
 
-        w = "abc" + "def" + å;
+        w = "abc" + "def" + å + 503n + 504 + true + false + undefined + null + {} + {a: 3} + function() {} + (() => {}) + [1];
         x = w;
         y = x;
         z = y;
@@ -252,6 +246,7 @@ const testSet: TestSet = [
         ctxt.client.raw(\`foo\`);
       `)
     ],
+
     [
       // Failure test #1 (testing lots of different types of things)
       makeSqlInjectionFailureTest(`
@@ -295,9 +290,6 @@ const testSet: TestSet = [
         ctxt.client.raw(aParam);
         ctxt.client.raw(aParam + (5).toString()); // This fails for two reasons (but only shows one)
         ctxt.client.raw((5).toString()); // And this fails like usual
-
-        const foo = 5; // Testing numeric literals! Just thrown in here.
-        ctxt.client.raw(5 + foo * 500 * foo);
       `,
         Array(4).fill("sqlInjection")
       ),
@@ -364,12 +356,131 @@ const testSet: TestSet = [
         "TypeORMEntityManager"
       ),
 
-      // Failure test #9 (testing `UserDatabase`)
+      // Failure test #9 (testing not using `TransactionContext`)
       makeSqlInjectionFailureTest(`
-        const userDb = {} as UserDatabase;
-        userDb.query("foo" + (5).toString());
+        ctxt;
+
+        class Other {
+          @Transaction() // This one does not use 'ctxt'
+          foo(ctxt: TransactionContext<Knex>) {}
+        }
+
+        const stuff = [1, 2, 3];
+        stuff[1] %= 30;
+
+        const x = "foo";
+
+        const bob = {
+          foo: 5,
+          bar: 6,
+          baz: stuff,
+          baz2: "literal",
+
+          get thing() {
+            return this.foo;
+          },
+
+          otherThing() {
+            console.log("Hello");
+          }
+        };
+
+        // But this one does
+        ctxt.client.raw(bob.baz2);
+        `,
+        Array(1).fill("transactionDoesntUseTheDatabase")
+      ),
+
+      // Failure test #10 (a simpler object test)
+      makeSqlInjectionFailureTest(`
+        // Case 1: declaring an object with a non-LR field
+        const foo = {a: (5).toString()};
+        ctxt.client.raw(foo.a); // Failure
+
+        // Case 2: reassigning an object with a non-LR field
+        let bar = {a: "initial"};
+        bar = {a: (7).toString()};
+        ctxt.client.raw(bar.a); // Failure
+
+        // Case 3: assining one field of an object with a non-LR field
+        const baz = {a: "initial"};
+        baz.a = (6).toString();
+        ctxt.client.raw(baz.a); // Failure
+        ctxt.client.raw(baz); // Failure
+        `,
+        Array(4).fill("sqlInjection")
+      ),
+
+      // Failure test #11 (a more complex object test)
+      makeSqlInjectionFailureTest(`
+        // This stuff should fail
+        const x = {y: "literal", z: {a: (30).toString()}};
+        const z = x.z;
+        const a = {b: z + x.y};
+        const c = {d: a.b};
+        ctxt.client.raw(c.d); // Failure
+
+        // This stuff should succeed
+        const xx = {yy: "literal", zz: {a: (40).toString()}};
+        const zz = xx.yy;
+        const aa = {bb: zz + xx.yy};
+        const cc = {dd: aa.bb};
+        ctxt.client.raw(cc.dd); // Success
         `,
         Array(1).fill("sqlInjection")
+      ),
+
+      // Failure test #12 (testing shorthand property assignment)
+      makeSqlInjectionFailureTest(`
+        const b = [(5).toString()];
+        const a = {b, c: "literal"};
+        ctxt.client.raw(a); // Failure
+        ctxt.client.raw(a.b); // Failure
+        ctxt.client.raw(a.c); // Success
+        `,
+        Array(2).fill("sqlInjection")
+      ),
+
+      // Failure test #13 (testing element array accesses)
+      makeSqlInjectionFailureTest(`
+        const foo = ["1", "2", (5).toString()];
+        ctxt.client.raw(foo); // Failure
+        ctxt.client.raw(foo[0]); // Failure
+
+        let bar = ["a", "b", "c"];
+        bar = [2, 3, 4];
+        bar[0] = 5;
+        bar = {a: 1, b: 2, c: (6).toString(), d: "literal"};
+        ctxt.client.raw(bar["c"]); // Failure
+        `,
+        Array(3).fill("sqlInjection")
+      ),
+
+      // Failure test #14 (testing nested object and array accesses, along with arbitrary parenthetical placements)
+      makeSqlInjectionFailureTest(`
+        const nested = {a: {b: {c: (20).toString(), d: "literal"}}, e: "another literal"};
+
+        ctxt.client.raw(nested.e); // Succeeds
+        ctxt.client.raw(nested.a.b.c); // Fails (reduces down to a.b (this is an implementation limitation), and then fails)
+        ctxt.client.raw(nested["a"]); // Fails
+        ctxt.client.raw(nested["a"]["b"]["d"]); // Fails
+        ctxt.client.raw((nested["a"])["b"]["c"]); // Fails
+        ctxt.client.raw((nested)["a"]["b"]["c"]); // Fails
+        ctxt.client.raw((nested["a"]["b"]["c"])); // Fails
+        `,
+        Array(6).fill("sqlInjection")
+      ),
+
+      // Failure test #15 (testing object access with leftmost non-allowed-lvalues)
+      makeSqlInjectionFailureTest(`
+        function fooFn(): {a: string} {
+          return {a: "hello"};
+        }
+
+        ctxt.client.raw(fooFn().a); // Failure
+        ctxt.client.raw(this.aFieldInTheClass); // Failure
+        `,
+        Array(2).fill("sqlInjection")
       )
     ]
   ],

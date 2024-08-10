@@ -6,15 +6,11 @@ import {
   CallExpression, ConstructorDeclaration, ClassDeclaration,
   MethodDeclaration, SyntaxKind, Expression, Identifier, Symbol,
   VariableDeclaration, VariableDeclarationKind, ParenthesizedExpression,
-  Project
+  Project, PropertyAccessExpression, ElementAccessExpression
 } from "ts-morph";
 
 import * as fs from "fs";
 import * as path from "path";
-
-// Should I find TypeScript variants of these?
-const secPlugin = require("eslint-plugin-security");
-const noSecrets = require("eslint-plugin-no-secrets");
 
 //////////////////////////////////////////////////////////////////////////////////////////////////// Here is my `ts-morph` linting code:
 
@@ -28,13 +24,25 @@ type EslintContext = TSESLint.RuleContext<string, unknown[]>;
 
 // TODO: support `FunctionExpression` and `ArrowFunction` too
 type FnDecl = FunctionDeclaration | MethodDeclaration | ConstructorDeclaration;
-type GlobalTools = {eslintContext: EslintContext, parserServices: ParserServicesWithTypeInformation, typeChecker: ts.TypeChecker};
+
+type GlobalTools = {
+  eslintContext: EslintContext,
+  rootEslintNode: EslintNode,
+  parserServices: ParserServicesWithTypeInformation,
+  typeChecker: ts.TypeChecker,
+  symRefMap: Map<Symbol, Node[]>
+};
 
 type ErrorMessageIdWithFormatData = [string, Record<string, unknown>];
 type ErrorCheckerResult = Maybe<string | ErrorMessageIdWithFormatData>;
 
 // This returns `string` for a simple error`, `ErrorMessageIdWithFormatData` for keys paired with formatting data, and `Nothing` for no error
 type ErrorChecker = (node: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean) => ErrorCheckerResult;
+
+/* Note that for property access expressions and element access expressions,
+that they cannot be mutlilayered (e.g. `a.b.c` or `a["b"]["c"]`). This is
+a current limitation in the implementation of allowed LValues for SQL injection.  */
+type AllowedLValue = Identifier | PropertyAccessExpression | ElementAccessExpression;
 
 ////////// These are some shared values used throughout the code
 
@@ -45,12 +53,10 @@ const awaitableTypes = new Set(["WorkflowContext"]); // Awaitable in determinist
 
 // This maps the ORM client name to a list of raw SQL query calls to check
 const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
-  // TODO: support `queryWithClient` later for `PoolClient` and `UserDatabase`
   ["PoolClient", ["query"]],
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]],
   ["TypeORMEntityManager", ["query"]],
-  ["Knex", ["raw"]],
-  ["UserDatabase", ["query"]]
+  ["Knex", ["raw"]]
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -96,9 +102,13 @@ Please verify that this call is deterministic or it may lead to non-reproducible
   const bcryptMessage = "Avoid using `bcrypt`, which contains native code. Instead, use `bcryptjs`. \
 Also, some `bcrypt` functions generate random data and should only be called from communicators";
 
+  const sqlInjectionNotes = `Note: for object access, an access of \`a.b.c.d\` will reduce to \`a.b\`, which may result in false positives;
+and accesses via brackets (e.g. \`a["b"]\`) only succeed when every field in the object is known to be always constant`;
+
   // The keys are the ids, and the values are the messages themselves
   return new Map([
-    ["sqlInjection", "Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'"],
+    ["sqlInjection", `Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: '{{ theExpression }}'\n${sqlInjectionNotes}`],
+    ["transactionDoesntUseTheDatabase", "This transaction does not use the database (via its `client` field). Consider using a communicator or a normal function"],
     ["globalMutation", "Deterministic DBOS operations (e.g. workflow code) should not mutate global variables; it can lead to non-reproducible behavior"],
     ["awaitingOnNotAllowedType", awaitMessage],
     ["Date", makeDateMessage("`Date()` or `new Date()`")],
@@ -107,7 +117,8 @@ Also, some `bcrypt` functions generate random data and should only be called fro
     ["console.log", "Avoid calling `console.log` directly; the DBOS logger, `ctxt.logger.info`, is recommended."],
     ["setTimeout", "Avoid calling `setTimeout()` directly; it can lead to undesired behavior when debugging"],
     ["bcrypt.hash", bcryptMessage],
-    ["bcrypt.compare", bcryptMessage]
+    ["bcrypt.compare", bcryptMessage],
+    ["debugLogMessage", "{{ message }}"]
   ]);
 }
 
@@ -132,7 +143,10 @@ So, setting this flag means that determinism warnings will be disabled for await
 const ignoreAwaitsForCallsWithAContextParam = true;
 
 // This is just for making sure that my tests work as they should
-const testingValidityOfTestsLocally = false;
+const testValidityOfTestsLocally = false;
+
+// This controls whether debug logging is enabled (outputted as an ESLint error)
+const enableDebugLog = false;
 
 /*
 TODO (requests from others, and general things for me to do):
@@ -145,19 +159,16 @@ TODO (requests from others, and general things for me to do):
 From me:
 - Run this over `dbos-transact`
 - Maybe track type and variable aliasing somewhere, somehow (if needed)
-- Should I check more functions for SQL injection, if non-transactions are allowed to run raw queries?
 - Mark some simple function calls as being constant (this could quickly spiral in terms of complexity)
 */
 
-////////// This is some meta package info
-
-const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
-const packageJsonInfo = readJSON(path.join(__dirname, packageJsonPrefix, "package.json"));
-
 ////////// These are some utility functions
 
-function readJSON(path: string): any {
-  return JSON.parse(fs.readFileSync(path, "utf8"));
+function debugLog(message: string) {
+  if (enableDebugLog) {
+    const eslintContext = GLOBAL_TOOLS!.eslintContext, rootNode = GLOBAL_TOOLS!.rootEslintNode;
+    eslintContext.report({ node: rootNode, messageId: "debugLogMessage", data: { message: message } });
+  }
 }
 
 function panic(message: string): never {
@@ -165,15 +176,29 @@ function panic(message: string): never {
 }
 
 // This function exists so that I can make sure that my tests are reading valid symbols
-function getSymbol(node: Node | Type): Maybe<Symbol> {
-  const symbol = node.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
+function getSymbol(nodeOrType: Node | Type): Maybe<Symbol> {
+  const symbol = nodeOrType.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
 
-  if (testingValidityOfTestsLocally && symbol === Nothing) {
-    const name = node instanceof Type ? "type" : "node";
-    panic(`Expected a symbol for this ${name}: '${node.getText()}'`);
+  if (symbol === Nothing) {
+    const name = (nodeOrType instanceof Node) ? "node" : "type";
+    debugLog(`Expected a symbol for this ${name}: '${nodeOrType.getText()}'`);
   }
 
   return symbol;
+}
+
+function getRefsToNodeOrSymbol(nodeOrSymbol: Node | Symbol): Node[] {
+  let maybeSymbol = nodeOrSymbol instanceof Node ? getSymbol(nodeOrSymbol) : nodeOrSymbol;
+
+  if (maybeSymbol === Nothing) {
+    debugLog("Found no symbol for the node or symbol passed in!");
+    return [];
+  }
+  else {
+    const refs = GLOBAL_TOOLS!.symRefMap.get(maybeSymbol);
+    if (refs === Nothing) panic("Expected to find refs for a symbol, but refs could not be found!");
+    return refs;
+  }
 }
 
 function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
@@ -184,7 +209,7 @@ function unpackParenthesizedExpression(expr: ParenthesizedExpression): Node {
 
 // This reduces `f.x.y.z` or `f.y().z.w()` into `f` (the leftmost child). This term need not be an identifier.
 function reduceNodeToLeftmostLeaf(node: Node): Node {
- while (true) {
+  while (true) {
     // For parenthesized expressions, we don't want the leftmost parenthesis
     if (Node.isParenthesizedExpression(node)) {
       node = unpackParenthesizedExpression(node);
@@ -208,40 +233,34 @@ function functionHasDecoratorInSet(fnDecl: FnDecl, decoratorSet: Set<string>): b
   );
 }
 
-/* This returns the lvalue and rvalue for an assignment,
-if the node is an assignment expression and the lvalue is an identifier */
-function getLAndRValuesIfAssignment(node: Node): Maybe<[Identifier, Expression]> {
-  if (Node.isBinaryExpression(node)) {
-    const operatorKind = node.getOperatorToken().getKind();
-
-    if (assignmentTokenKinds.has(operatorKind)) {
-      /* Reducing from `a.b.c` to `a`, or just `a` to `a`.
-      Also, note that `lhs` means lefthand side. */
-      const lhs = reduceNodeToLeftmostLeaf(node.getLeft());
-      if (Node.isIdentifier(lhs)) return [lhs, node.getRight()];
-    }
-  }
+function isAllowedLValue(node: Node): node is AllowedLValue {
+  return Node.isIdentifier(node) || Node.isPropertyAccessExpression(node) || Node.isElementAccessExpression(node);
 }
 
 ////////// These functions are the determinism heuristics that I've written
 
+// Could I use `getSymbolsInScope` with some right combination of flags here?
 const mutatesGlobalVariable: ErrorChecker = (node, _fnDecl, isLocal) => {
-  // Could I use `getSymbolsInScope` with some right combination of flags here?
-  const maybeLAndRValues = getLAndRValuesIfAssignment(node);
-  if (maybeLAndRValues === Nothing) return;
+  if (!Node.isBinaryExpression(node)) return;
 
-  const lhsSymbol = getSymbol(maybeLAndRValues[0]);
+  const operatorKind = node.getOperatorToken().getKind();
+  if (!assignmentTokenKinds.has(operatorKind)) return;
+
+  /* Reducing from `a.b.c` to `a`, or just `a` to `a`.
+  Also, note that `lhs` means lefthand side. */
+  const lhs = reduceNodeToLeftmostLeaf(node.getLeft());
+  if (!isAllowedLValue(lhs)) return;
+
+  const lhsSymbol = getSymbol(lhs);
 
   if (lhsSymbol !== Nothing && !isLocal(lhsSymbol)) {
     return "globalMutation";
   }
 
-  /*
-  Note that `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` both work,
+  /* Note that `a = 5, b = 6`, or `x = 23 + x, x = 24 + x;` both work,
   along with variable swaps in the style of `b = [a, a = b][0]`.
-  TODO: catch spread assignments like this one: `[a, b] = [b, a]`.
-  */
-}
+  TODO: catch spread assignments like this one: `[a, b] = [b, a]`. */
+};
 
 /* TODO: should I ban more IO functions, like `fetch`,
 and mutating global arrays via functions like `push`, etc.? */
@@ -265,11 +284,12 @@ const callsBannedFunction: ErrorChecker = (node, _fnDecl, _isLocal) => {
       }
     }
   }
-}
+};
 
 // TODO: match against `.then` as well (with a promise object preceding it)
 const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
-  // If the valid type set and arg type set intersect, then there's a valid type in the args
+
+  // If the valid type set and arg type set intersect, then there's a valid type in the args.
   function validTypeExistsInFunctionCallParams(functionCall: CallExpression, validTypes: Set<string>): boolean {
     // I'd like to use `isDisjointFrom` here, but it doesn't seem to be available, for some reason
     const argTypes = functionCall.getArguments().map(getTypeNameForTsMorphNode);
@@ -289,8 +309,8 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
       if (Node.isLiteralExpression(lhs)) return;
 
       else {
-        return; // Sometimes throwing an error here, since I want to catch what this could be, and maybe revise the code below
-        // panic(`Hm, what could this expression be? Examine... (LHS: '${functionCall.getText()}', kind: ${lhs.getKindName()})`);
+        debugLog(`Hm, what could this expression be? Examine... (LHS: '${functionCall.getText()}', kind: ${lhs.getKindName()})`);
+        return;
       }
     }
 
@@ -310,7 +330,7 @@ const awaitsOnNotAllowedType: ErrorChecker = (node, _fnDecl, _isLocal) => {
       return "awaitingOnNotAllowedType";
     }
   }
-}
+};
 
 ////////// This code is for detecting SQL injections
 
@@ -319,13 +339,15 @@ function getNodePosInFile(node: Node): {line: number, column: number} {
 }
 
 // This checks if a variable was used before it was declared; if so, there's a hoisting issue, and skip the declaration.
-function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDeclaration): boolean {
-  const declKind = decl.getVariableStatement()?.getDeclarationKind() ?? panic("When would a variable statement ever not be defined?");
+function lValueUsageIsValidRegardingHoisting(allowedLValueUsage: AllowedLValue, decl: VariableDeclaration): boolean {
+  const variableStatement = decl.getVariableStatement();
+  if (variableStatement === Nothing) return true; // This should ideally never happen
+  const declKind = variableStatement.getDeclarationKind();
 
   // If a variable was declared with `var`, then it can be used before it's declared (damn you, Brendan Eich!)
   if (declKind === VariableDeclarationKind.Var) return true;
 
-  const identifierPos = getNodePosInFile(identifierUsage), declPos = getNodePosInFile(decl);
+  const identifierPos = getNodePosInFile(allowedLValueUsage), declPos = getNodePosInFile(decl);
 
   const declIsOnPrevLine = declPos.line < identifierPos.line;
   const declIsOnSameLineButBeforeIdentifier = (declPos.line === identifierPos.line && declPos.column < identifierPos.column);
@@ -333,60 +355,97 @@ function identifierUsageIsValid(identifierUsage: Identifier, decl: VariableDecla
   return declIsOnPrevLine || declIsOnSameLineButBeforeIdentifier;
 }
 
-// This function scans the scope to checkbody, and finds all things assigned to the given identifier (excluding the one passed in). A thing is either an rvalue expression or a function parameter.
-function* getAssignmentsToIdentifier(scopeToCheck: Node, identifier: Identifier): Generator<Expression | "NotRValueButFnParam"> {
-  for (const child of scopeToCheck.getChildren()) { // Could I iterate through here without allocating the children?
-    yield* getAssignmentsToIdentifier(child, identifier);
+function* implGetAssignmentsToLValue(maybeAllowedLValue: Node,
+  rhsExtractor: (rhs: Expression) => Maybe<Node>): Generator<Node | "NotRValueButFnParam"> {
 
-    ////////// First, see if the child should be checked or not
+  // e.g. `bar().foo`, or `this.foo`
+  if (!isAllowedLValue(maybeAllowedLValue)) {
+    yield maybeAllowedLValue;
+    return;
+  }
 
-    const isTheSameButUsedInAnotherPlace = (
-      child !== identifier // Not the same node as our identifier
-      && Node.isIdentifier(child) // This child is an identifier
-      && getSymbol(child) === getSymbol(identifier) // They have the same symbol (this stops false positives from shadowed values)
-    );
+  const allowedLValue: AllowedLValue = maybeAllowedLValue;
 
-    if (!isTheSameButUsedInAnotherPlace) continue;
+  for (const ref of getRefsToNodeOrSymbol(allowedLValue)) {
+    if (ref === allowedLValue) continue;
 
-    ////////// Then, analyze the child
+    if (Node.isVariableDeclaration(ref)) {
+      if (!lValueUsageIsValidRegardingHoisting(allowedLValue, ref)) continue;
+      const initializer = ref.getInitializer();
+      if (initializer === Nothing) continue;
 
-    const parent = child.getParent() ?? panic("When would the parent to a reference ever not be defined?");
-
-    if (Node.isVariableDeclaration(parent)) {
-      // In this case, silently skip the reference (a compilation step will catch any hoisting issues)
-      if (!identifierUsageIsValid(identifier, parent)) continue;
-
-      const initialValue = parent.getInitializer();
-      if (initialValue === Nothing) continue; // Not initialized yet, so skip this reference
-
-      yield initialValue;
+      const initialValue = rhsExtractor(initializer);
+      if (initialValue !== Nothing) yield initialValue;
+    }
+    else if (Node.isParameterDeclaration(ref)) {
+      yield "NotRValueButFnParam";
     }
     else {
-      const maybeLAndRValues = getLAndRValuesIfAssignment(parent);
+      let refParent = ref;
 
-      if (maybeLAndRValues !== Nothing) {
-        yield maybeLAndRValues[1];
+      while (Node.isLeftHandSideExpression(refParent)) {
+        refParent = refParent.getParentOrThrow("Expected a parent node to exist!");
       }
-      // This only applies if the scope to check if a function
-      else if (Node.isParameterDeclaration(parent)) {
-        yield "NotRValueButFnParam";
+
+      if (Node.isBinaryExpression(refParent)) {
+        const extracted = rhsExtractor(refParent.getRight());
+        if (extracted !== Nothing) yield extracted;
       }
     }
   }
 }
 
-function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean): Maybe<ErrorMessageIdWithFormatData> {
+/* This function scans the scope to check, and finds all things assigned to the given identifier
+(excluding the one passed in). A 'thing' is either an rvalue expression or a function parameter.
+Also note that the identifier can be something like `x`, where an assignment could be something like
+`x.y` (so not just an direct assignment). Indexing works too.
+
+If multilayered access happens, like `x.y.z`, or `x["y"]["z"]`, the node will get reduced down to the
+first layer of access (so `x.y` and `x["y"]`, which may result in false positives. As a programmer,
+you can make plugin able to detect this if you assign each access step along the way to a variable. */
+function* getAssignmentsToLValue(allowedLValue: AllowedLValue): Generator<Node | "NotRValueButFnParam"> {
+  if (Node.isPropertyAccessExpression(allowedLValue)) {
+
+    /* If we have nested property access (e.g. `a.b.c.d`, as compared to `a.b`),
+    reduce that down to `a.b`. This will sometimes yield false positives though. */
+    const firstDot = allowedLValue.getFirstDescendantByKindOrThrow(SyntaxKind.DotToken, "Expected a dot token!");
+    const firstPropertyAccess = firstDot.getParentOrThrow("Expected a parent to the dot token!");
+    const leftmostObject = firstPropertyAccess.getChildAtIndex(0), firstPropField = firstPropertyAccess.getChildAtIndex(2);
+
+    yield* implGetAssignmentsToLValue(leftmostObject, (rhsAssignment) => {
+      if (Node.isObjectLiteralExpression(rhsAssignment)) {
+        const propName = firstPropField.getText();
+        const result = rhsAssignment.getProperty(propName);
+        if (result === Nothing) debugLog(`No property found with this name: '${propName}'`);
+        return result;
+      }
+      else {
+        return rhsAssignment;
+      }
+    });
+  }
+  else if (Node.isElementAccessExpression(allowedLValue)) {
+    // TODO: should I do a similar reduction here?
+    const leftmostObject = reduceNodeToLeftmostLeaf(allowedLValue);
+    yield* implGetAssignmentsToLValue(leftmostObject, (rhsAssignment) => rhsAssignment);
+  }
+
+  yield* implGetAssignmentsToLValue(allowedLValue, (rhsAssignment) => rhsAssignment);
+}
+
+function checkCallForInjection(callParam: Node): Maybe<ErrorMessageIdWithFormatData> {
   /*
-  A literal-reducible value is either a literal string/number, or a variable that reduces down to a literal string/number. Acronym: LR.
-  I'm just mentioning numbers here since the core allowed value is a string or number literal (but the main query parameter is a string).
+  A literal-reducible value is either a literal value, or a variable that reduces down to a literal value.
+  Some examples of literal values would be literal strings, literal numbers, bigints, enums, etc. Acronym: LR.
+  The main query parameter is implicitly assumed to be a string, though.
 
   Here's what's allowed for SQL string parameters (from a supported callsite):
     1. LR
     2. LRs concatenated with other LRs
     3. Variables that reduce down to LRs concatenated with other LRSs
 
-  A literal-reducible value is not flagged for SQL injection, since injection would typically
-  happen in a case where you take some other non-literal-string datatype, cast it to a string,
+  A LR-value is not flagged for SQL injection, since injection would typically
+  happen in a case where you take some other non-literal datatype, cast it to a string,
   and then concatenate that with a SQL query string. As long as the final value passed to the
   callsite is only built up from literal strings at its core, then the final string should be okay.
   */
@@ -400,8 +459,8 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   for the sake of efficiency: it's just so that reference cycles won't result
   in infinite recursion.
 
-  Also note that errors may be falsely reported if you first use a string for a raw query,
-  and then assign that query to a non-LR value. In most cases, that post-assigned value will
+  Also note that errors may be falsely reported if you first make a raw query string, use that in a query,
+  and then assign that string to a non-LR value after. In most cases, that post-assigned value will
   not affect the query, but if you are in a loop and the query string is defined in an outer
   scope, the next loop iteration may then receive that non-LR value, which would qualify as a SQL injection.
 
@@ -420,16 +479,16 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
     OnlyAssignedToLRValues
   }
 
-  function getIdentifierAssignmentCategory(identifier: Identifier, scopeToCheck: Node): ScopeAssignmentCategory {
+  function getLValueAssignmentCategory(allowedLValue: AllowedLValue): ScopeAssignmentCategory {
     let foundAssignedThing = false;
 
-    for (const thingAssigned of getAssignmentsToIdentifier(scopeToCheck, identifier)) {
+    for (const thingAssigned of getAssignmentsToLValue(allowedLValue)) {
       foundAssignedThing = true;
 
       // If it's not a function param, it's an rvalue expression
-      const isParam = thingAssigned === "NotRValueButFnParam";
+      const isParam = (thingAssigned === "NotRValueButFnParam");
 
-      if (isParam) rootProblemNodes.add(identifier);
+      if (isParam) rootProblemNodes.add(allowedLValue);
       if (isParam || !isLR(thingAssigned)) return ScopeAssignmentCategory.AssignedToNonLRValue;
     }
 
@@ -437,8 +496,14 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 
   function isLRWithoutStateCache(node: Node): boolean {
-    // Note: a no-substitution template literal might be something like `foo` (as compared to `foo${bar}`
-    if (Node.isStringLiteral(node) || Node.isNoSubstitutionTemplateLiteral(node) || Node.isNumericLiteral(node)) {
+    ////////// This part concerns the most primitive types of values
+
+    /* The `isLiteral` here does not cover all literal types; it only does booleans,
+    bigints, enums, numbers, and strings (and no-substitution template literals), I think. */
+    if (node.getType().isLiteral() || Node.isNullLiteral(node) || Node.isRegularExpressionLiteral(node)
+      || Node.isFunctionDeclaration(node) || Node.isFunctionExpression(node) || Node.isArrowFunction(node)
+      || Node.isClassDeclaration(node) || Node.isClassExpression(node)) {
+
       return true;
     }
     /* i.e. if it's a format string (like `${foo} ${bar} ${baz}`).
@@ -451,32 +516,78 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
         return isLR(span.getChildAtIndex(0));
       });
     }
-    else if (Node.isIdentifier(node)) {
-      const symbol = getSymbol(node);
-
-      const scopeToExamine = (symbol !== Nothing && isLocal(symbol))
-        ? fnDecl : fnDecl.getFirstAncestorByKindOrThrow(SyntaxKind.SourceFile);
-
-      const assignmentCategory = getIdentifierAssignmentCategory(node, scopeToExamine);
-
-      switch (assignmentCategory) {
+    else if (isAllowedLValue(node)) {
+      switch (getLValueAssignmentCategory(node)) {
         // Failing silently when there's nothing assigned to a value (the compiler will take care of this error)
-        case ScopeAssignmentCategory.NotAssignedToInScope: return true;
-        case ScopeAssignmentCategory.AssignedToNonLRValue: return false;
-        case ScopeAssignmentCategory.OnlyAssignedToLRValues: return true;
+        case ScopeAssignmentCategory.NotAssignedToInScope:
+          debugLog(`Never assigned to: '${node.getText()}'`);
+          return true;
+        case ScopeAssignmentCategory.AssignedToNonLRValue:
+          return false;
+        case ScopeAssignmentCategory.OnlyAssignedToLRValues:
+          return true;
       }
     }
+
+    ////////// This part concerns simple expressions wrapped in other expressions
+
     else if (Node.isBinaryExpression(node)) {
       return isLR(node.getLeft()) && isLR(node.getRight());
     }
     else if (Node.isParenthesizedExpression(node)) {
       return isLR(unpackParenthesizedExpression(node));
     }
+    else if (Node.isConditionalExpression(node)) {
+      return isLR(node.getWhenTrue()) && isLR(node.getWhenFalse());
+    }
+    else if (Node.isArrayLiteralExpression(node)) {
+      return node.getElements().every(isLR);
+    }
+
+    ////////// This part concerns object access
+
+    else if (Node.isObjectLiteralExpression(node)) {
+      return node.getProperties().every(isLR);
+    }
+    else if (Node.isPropertyAssignment(node)) {
+      const initializer = node.getInitializer();
+      return (initializer === Nothing) ? true : isLR(initializer);
+    }
+    else if (Node.isShorthandPropertyAssignment(node)) {
+      const assignmentValueSymbol = node.getValueSymbol();
+
+      // Failing if there's no assigned symbol here
+      if (assignmentValueSymbol === Nothing) {
+        debugLog("Expecting the assignment value symbol to have a value!");
+        rootProblemNodes.add(node);
+        return false;
+      }
+
+      for (const ref of getRefsToNodeOrSymbol(assignmentValueSymbol)) {
+        if (ref === node) continue;
+
+        else if (!Node.isVariableDeclaration(ref)) {
+          panic("Unknown structure of assignment value symbol for shorthand property assignment!");
+        }
+
+        const initializer = ref.getInitializer();
+        if (initializer !== Nothing && !isLR(initializer)) return false;
+      }
+
+      debugLog(`No refs exist pointing to this shorthand property assignment: ${node.getText()}`);
+      return true;
+    }
+    // TODO: support spread assignments
+    else if (Node.isGetAccessorDeclaration(node) || Node.isSetAccessorDeclaration(node) || Node.isMethodDeclaration(node)) {
+      return true;
+    }
     else {
       rootProblemNodes.add(node);
       return false;
     }
   }
+
+  ////////// This is the LR-state-caching code
 
   function isLR(node: Node): boolean {
     const maybeState = nodeLRStates.get(node);
@@ -494,8 +605,11 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 
   if (!isLR(callParam)) {
-    if (rootProblemNodes.size !== 1) panic("There's a strict requirement of 1 root problem node during failure!");
-    let discoveredNode = Array.from(rootProblemNodes)[0];
+    if (rootProblemNodes.size !== 1) {
+      panic(`There's a strict requirement of 1 root problem node during failure! Got ${rootProblemNodes.size}.`);
+    }
+
+    const discoveredNode = Array.from(rootProblemNodes)[0];
 
     return ["sqlInjection", {
       lineNumber: getNodePosInFile(discoveredNode).line,
@@ -504,9 +618,13 @@ function checkCallForInjection(callParam: Node, fnDecl: FnDecl, isLocal: (symbol
   }
 }
 
-// If it's a raw SQL injection callsite, then this returns the arguments to examine
-function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]> {
+// If it's a raw SQL injection callsite, then this returns the argument to examine
+function maybeGetArgFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node> {
   const callExprWithoutParams = callExpr.getExpression();
+  const args = callExpr.getArguments();
+
+  // Need the first argument, which is the query string
+  if (args.length === 0) return;
 
   // `client.<callName>`, or `ctxt.client.<callName>`, and so on with the prefixes
   const identifiers = callExprWithoutParams.getDescendantsOfKind(SyntaxKind.Identifier);
@@ -515,33 +633,96 @@ function maybeGetArgsFromRawSqlCallSite(callExpr: CallExpression): Maybe<Node[]>
   if (identifierTypeNames.length < 2) return; // Can't recognize a raw SQL call for 0 or 1 identifiers
 
   const expectedClient = identifierTypeNames[identifierTypeNames.length - 2];
-  const info = ormClientInfoForRawSqlQueries.get(expectedClient);
-  if (info === Nothing) return;
+  const callNames = ormClientInfoForRawSqlQueries.get(expectedClient);
+  if (callNames === Nothing) return;
 
   const expectedRawQueryCall = identifiers[identifiers.length - 1].getText();
-  if (info.includes(expectedRawQueryCall)) return callExpr.getArguments();
-}
 
-const isSqlInjection: ErrorChecker = (node, fnDecl, isLocal) => {
-  if (Node.isCallExpression(node)) {
-    const maybeArgs = maybeGetArgsFromRawSqlCallSite(node);
-
-    // Just checking the first argument
-    if (maybeArgs !== Nothing && maybeArgs.length !== 0) {
-      return checkCallForInjection(maybeArgs[0], fnDecl, isLocal);
-    }
+  if (callNames.includes(expectedRawQueryCall)) {
+    return args[0];
   }
 }
 
+const isSqlInjection: ErrorChecker = (node, _fnDecl, _isLocal) => {
+  if (Node.isCallExpression(node)) {
+    const maybeArg = maybeGetArgFromRawSqlCallSite(node);
+
+    if (maybeArg !== Nothing) {
+      return checkCallForInjection(maybeArg);
+    }
+  }
+};
+
+////////// This code is for detecting useless transactions
+
+/* Note: this may result in false negatives for nested closures that capture the transaction context's client,
+and when you call helper functions that you pass the context object to, but that helper function does nothing. */
+const transactionDoesntUseTheDatabase: ErrorChecker = (node, fnDecl, _isLocal) => {
+  if (node !== fnDecl) return; // Only analyze the whole function
+
+  const params = fnDecl.getParameters();
+  if (params.length === 0) return; // In this case, not a valid transaction
+
+  const transactionContext = params[0];
+  const transactionContextSymbol = getSymbol(transactionContext); // The first param should be the transaction context
+  if (transactionContextSymbol === Nothing) return; // No symbol for the first param -> should not analyze
+
+  let foundDatabaseUsage = false;
+
+  for (const ref of getRefsToNodeOrSymbol(transactionContextSymbol)) {
+    if (ref === transactionContext) continue;
+
+    const parent = ref.getParentOrThrow("Expected a parent node to exist!");
+
+    if (Node.isPropertyAccessExpression(parent) && parent.getChildCount() >= 3) {
+      const left = parent.getChildAtIndex(0), right = parent.getChildAtIndex(2);
+
+      if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
+        foundDatabaseUsage = true;
+        break;
+      }
+    }
+    else {
+      const parentCall = ref.getFirstAncestorByKind(SyntaxKind.CallExpression);
+      if (parentCall === Nothing) continue;
+
+      if (parentCall.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
+        foundDatabaseUsage = true;
+        break;
+      }
+    }
+  }
+
+  if (!foundDatabaseUsage) return "transactionDoesntUseTheDatabase";
+};
+
 ////////// This is the main function that recurs on the `ts-morph` AST
 
-/* Note: a workflow can never be a transaction, so no need to worry about overlap here.
-Also, note: checking all functions for SQL injection, since oftentimes, functions will do
-transactions without the decorator. */
+/*
+First field: a set of method decorators to match on (if `Nothing`, then match on everything).
+Second field: a list of error checkers to run.
+*/
 const decoratorSetErrorCheckerMapping: [Maybe<Set<string>>, ErrorChecker[]][] = [
-  [Nothing, [isSqlInjection]], // Checking for SQL injection here
+  [Nothing, [isSqlInjection]], // Checking for SQL injection here (all functions)
+  [new Set(["Transaction"]), [transactionDoesntUseTheDatabase]], // Checking for useless transactions here
   [new Set(["Workflow"]), [mutatesGlobalVariable, callsBannedFunction, awaitsOnNotAllowedType]] // Checking for nondeterminism here
 ];
+
+function runErrorCheckers(node: Node, fnDecl: FnDecl, isLocal: (symbol: Symbol) => boolean) {
+  for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
+    if ((decoratorSet === Nothing || functionHasDecoratorInSet(fnDecl, decoratorSet))) {
+
+      for (const errorChecker of errorCheckers) {
+        const response = errorChecker(node, fnDecl, isLocal);
+
+        if (response !== Nothing) {
+          const [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
+          GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
+        }
+      }
+    }
+  }
+}
 
 function analyzeFunction(fnDecl: FnDecl) {
   // A function declaration without a body: `declare function myFunction();`
@@ -573,18 +754,10 @@ function analyzeFunction(fnDecl: FnDecl) {
   const isLocal = (symbol: Symbol) => stack.has(symbol);
   */
 
-  function runErrorChecker(errorChecker: ErrorChecker, node: Node) {
-    const response = errorChecker(node, fnDecl, isLocal);
-
-    if (response !== Nothing) {
-      const [messageId, formatData] = typeof response === "string" ? [response, {}] : response;
-      GLOBAL_TOOLS!.eslintContext.report({ node: makeEslintNode(node), messageId: messageId, data: formatData });
-    }
-  }
+  // Run the error checkers over the fn decl itself as well
+  runErrorCheckers(fnDecl, fnDecl, isLocal);
 
   function analyzeFrame(node: Node) {
-    const locals = getCurrentFrame();
-
     if (Node.isClassDeclaration(node)) {
       analyzeClass(node);
       return;
@@ -605,14 +778,10 @@ function analyzeFunction(fnDecl: FnDecl) {
     // Note: parameters are not considered to be locals here (mutating them is not allowed, currently!)
     else if (Node.isVariableDeclaration(node)) {
       const symbol = getSymbol(node);
-      if (symbol !== Nothing) locals.add(symbol);
+      if (symbol !== Nothing) getCurrentFrame().add(symbol);
     }
     else {
-      for (const [decoratorSet, errorCheckers] of decoratorSetErrorCheckerMapping) {
-        if (decoratorSet === Nothing || functionHasDecoratorInSet(fnDecl, decoratorSet)) {
-          errorCheckers.forEach((errorChecker) => runErrorChecker(errorChecker, node));
-        }
-      }
+      runErrorCheckers(node, fnDecl, isLocal);
     }
 
     node.forEachChild(analyzeFrame);
@@ -650,6 +819,7 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
   // If it's a literal type, it'll get the base type; otherwise, nothing happens
   const type = tsMorphNode.getType().getBaseTypeOfLiteralType();
+
   const maybeSymbol = getSymbol(type);
   return maybeSymbol?.getName() ?? type.getText();
 }
@@ -662,7 +832,7 @@ function checkDiagnostics(node: Node) {
   project.createSourceFile("temp.ts", eslintNodeCode, { overwrite: true });
   const diagnostics = project.getPreEmitDiagnostics();
 
-  if (diagnostics.length != 0) {
+  if (diagnostics.length !== 0) {
     const formatted = diagnostics.map((diagnostic) =>
       `Diagnostic at line ${diagnostic.getLineNumber()}: ${JSON.stringify(diagnostic.getMessageText())}.\n---\n`
     ).join("\n");
@@ -671,17 +841,37 @@ function checkDiagnostics(node: Node) {
   }
 }
 
+function buildSymRefMap(root: Node): Map<Symbol, Node[]> {
+  let map = new Map<Symbol, Node[]>();
+
+  root.forEachDescendant((descendant) => {
+    // Not using the wrapping `getSymbol` here to avoid errors
+    const symbol = descendant.getSymbol();
+    if (symbol === Nothing) return;
+
+    const refList = map.get(symbol);
+    if (refList === Nothing) map.set(symbol, ([descendant]));
+    else refList.push(descendant);
+  });
+
+  return map;
+}
+
 function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
   const parserServices = ESLintUtils.getParserServices(eslintContext, false);
 
   GLOBAL_TOOLS = {
     eslintContext: eslintContext,
+    rootEslintNode: eslintNode,
     parserServices: parserServices,
-    typeChecker: parserServices.program.getTypeChecker()
+    typeChecker: parserServices.program.getTypeChecker(),
+    symRefMap: new Map()
   };
 
   const tsMorphNode = makeTsMorphNode(eslintNode);
-  if (testingValidityOfTestsLocally) checkDiagnostics(tsMorphNode);
+  if (testValidityOfTestsLocally) checkDiagnostics(tsMorphNode);
+
+  GLOBAL_TOOLS!.symRefMap = buildSymRefMap(tsMorphNode);
 
   try {
     if (Node.isStatemented(tsMorphNode)) {
@@ -702,7 +892,8 @@ function analyzeRootNode(eslintNode: EslintNode, eslintContext: EslintContext) {
 
 /*
 - Take a look at these functions later on:
-isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment, isQualifiedName, isVariableDeclarationList
+isArrowFunction, isFunctionExpression, isObjectBindingPattern, isPropertyAssignment,
+isQualifiedName, isVariableDeclarationList, isUpdateExpression
 
 - Check function expressions and arrow functions for mutation (and interfaces?)
 - Check for recursive global mutation for expected-to-be-deterministic functions
@@ -777,12 +968,16 @@ export const dbosStaticAnalysisRule = createRule({
   meta: {
     schema: [],
     type: "suggestion",
-    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking)" },
+    docs: { description: "Analyze DBOS applications to make sure they run reliably (e.g. determinism checking, SQL injection detection, etc..." },
     messages: Object.fromEntries(errorMessages)
   },
 
   defaultOptions: []
 });
+
+const packageJsonPrefix = (path.basename(process.cwd()) === "eslint-plugin") ? "" : "../";
+const packageJsonPath = path.join(__dirname, packageJsonPrefix, "package.json");
+const packageJsonInfo = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 
 module.exports = {
   meta: {
@@ -794,8 +989,10 @@ module.exports = {
 
   plugins: {
     "@typescript-eslint": tslintPlugin,
-    "security": secPlugin,
-    "no-secrets": noSecrets
+
+    // Should I find TypeScript variants of these?
+    "security": require("eslint-plugin-security"),
+    "no-secrets": require("eslint-plugin-no-secrets")
   },
 
   configs: {
