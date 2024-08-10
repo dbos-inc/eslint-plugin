@@ -179,8 +179,8 @@ function panic(message: string): never {
 function getSymbol(nodeOrType: Node | Type): Maybe<Symbol> {
   const symbol = nodeOrType.getSymbol(); // Hm, how is `getSymbolAtLocation` different?
 
-  if (symbol === Nothing && nodeOrType instanceof Node) {
-    const name = nodeOrType instanceof Type ? "type" : "node";
+  if (symbol === Nothing) {
+    const name = (nodeOrType instanceof Node) ? "node" : "type";
     debugLog(`Expected a symbol for this ${name}: '${nodeOrType.getText()}'`);
   }
 
@@ -822,6 +822,7 @@ function makeEslintNode(tsMorphNode: Node): EslintNode {
 function getTypeNameForTsMorphNode(tsMorphNode: Node): string {
   // If it's a literal type, it'll get the base type; otherwise, nothing happens
   const type = tsMorphNode.getType().getBaseTypeOfLiteralType();
+
   const maybeSymbol = getSymbol(type);
   return maybeSymbol?.getName() ?? type.getText();
 }

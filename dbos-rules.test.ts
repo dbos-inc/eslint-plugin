@@ -99,6 +99,8 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
     }
 
     class SqlInjectionTestClass {
+      aFieldInTheClass: string;
+
       @Transaction()
       injectionTestMethod(ctxt: TransactionContext<${sqlClient}>, aParam: string) {
         ${code}
@@ -373,6 +375,7 @@ const testSet: TestSet = [
           foo: 5,
           bar: 6,
           baz: stuff,
+          baz2: "literal",
 
           get thing() {
             return this.foo;
@@ -383,7 +386,7 @@ const testSet: TestSet = [
           }
         };
 
-        ctxt.client.raw(bob);
+        ctxt.client.raw(bob.baz2);
         `,
         Array(1).fill("transactionDoesntUseTheDatabase")
       ),
@@ -440,43 +443,42 @@ const testSet: TestSet = [
 
       // Failure test #13 (testing element array accesses)
       makeSqlInjectionFailureTest(`
-        const foo = [1, 2, (5).toString()];
+        const foo = ["1", "2", (5).toString()];
         ctxt.client.raw(foo); // Failure
         ctxt.client.raw(foo[0]); // Failure
 
         let bar = ["a", "b", "c"];
         bar = [2, 3, 4];
-        bar[0] = "hallo";
-        bar = {a: 1, b: 2, c: (6).toString()};
-        ctxt.client.raw(bar[0]); // Failure
+        bar[0] = 5;
+        bar = {a: 1, b: 2, c: (6).toString(), d: "literal"};
+        ctxt.client.raw(bar["c"]); // Failure
         `,
         Array(3).fill("sqlInjection")
       ),
 
       // Failure test #14 (testing nested object and array accesses, along with arbitrary parenthetical placements)
       makeSqlInjectionFailureTest(`
-        const nested = {a: {b: {c: (20).toString(), d: "literal"}}, e: 50};
+        const nested = {a: {b: {c: (20).toString(), d: "literal"}}, e: "another literal"};
 
-        ctxt.client.raw(nested.a.e); // Succeeds
-        ctxt.client.raw(nested.a.e.foo()); // Fails
+        ctxt.client.raw(nested.e); // Succeeds
         ctxt.client.raw(nested.a.b.c); // Fails (reduces down to a.b (this is an implementation limitation), and then fails)
         ctxt.client.raw(nested["a"]); // Fails
-        ctxt.client.raw(nested["a"]["b"]); // Fails
-        ctxt.client.raw((nested["a"])["b"]); // Fails
-        ctxt.client.raw((nested)["a"]["b"]); // Fails
-        ctxt.client.raw((nested["a"]["b"])); // Fails
+        ctxt.client.raw(nested["a"]["b"]["d"]); // Fails
+        ctxt.client.raw((nested["a"])["b"]["c"]); // Fails
+        ctxt.client.raw((nested)["a"]["b"]["c"]); // Fails
+        ctxt.client.raw((nested["a"]["b"]["c"])); // Fails
         `,
-        Array(8).fill("sqlInjection")
+        Array(6).fill("sqlInjection")
       ),
 
       // Failure test #15 (testing object access with leftmost non-allowed-lvalues)
       makeSqlInjectionFailureTest(`
-        function fooFn(): any {
-          return undefined;
+        function fooFn(): {a: string} {
+          return {a: "hello"};
         }
 
         ctxt.client.raw(fooFn().a); // Failure
-        ctxt.client.raw(this.a); // Failure
+        ctxt.client.raw(this.aFieldInTheClass); // Failure
         `,
         Array(2).fill("sqlInjection")
       )
