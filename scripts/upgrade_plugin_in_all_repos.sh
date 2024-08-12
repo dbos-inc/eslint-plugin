@@ -103,6 +103,8 @@ upgrade_repo() {
     fi
 
     echo "$upgrade_output"
+
+    last_directory="$directory"
   done
 
   if [[ $all_upgrades_skipped = true ]]; then
@@ -114,7 +116,7 @@ upgrade_repo() {
   ##########
 
   orig_dir="$PWD"
-  cd "$first_directory"
+  cd "$last_directory"
   version=$(get_eslint_plugin_version)
   cd "$orig_dir"
 
