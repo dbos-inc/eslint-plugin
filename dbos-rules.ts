@@ -56,7 +56,8 @@ const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
   ["Knex", ["raw"]], // For Knex
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]], // For Prisma
   ["EntityManager", ["query"]], // For TypeORM
-  ["PoolClient", ["query"]] // This is supported in `dbos-transact` (see `user_database.ts`, but not sure what ORM this corresponds to)
+  ["PoolClient", ["query"]], // This is supported in `dbos-transact` (see `user_database.ts`, but not sure what ORM this corresponds to)
+  // ["PgDatabase", []], // For Drizzle (TODO: add full support for this)
 ]);
 
 const assignmentTokenKinds = new Set([
@@ -108,8 +109,8 @@ and accesses via brackets (e.g. \`a["b"]\`) only succeed when every field in the
   // The keys are the ids, and the values are the messages themselves
   return new Map([
     ["transactionHasNoParameters", "This transaction has no parameters; add a `TransactionContext` parameter"],
-    ["transactionContextHasNoTypeArguments", "The transaction context passed to this transaction has no type arguments; add one to specify the database client"],
-    ["transactionContextHasInvalidClientType", "The database client type `{{ clientType }}` used here is not recognized; consult the DBOS docs to find a supported one"],
+    ["transactionContextHasNoTypeArguments", "The context passed to this transaction has no type arguments; add one to specify the database client"],
+    ["transactionContextHasInvalidClientType", "The database client type `{{ clientType }}` used here is not recognized by the linter; consult the DBOS docs to find a supported one"],
     ["transactionDoesntUseTheDatabase", "This transaction does not use the database (via its `client` field). Consider using a communicator or a normal function"],
 
     ["sqlInjection", `Possible SQL injection detected. The parameter to the query call site traces back to the nonliteral on line {{ lineNumber }}: \`{{ theExpression }}\`\n${sqlInjectionNotes}`],
@@ -199,7 +200,7 @@ function getTypeName(nodeOrType: Node | Type): string {
     // If it's a literal type, it'll get the base type; otherwise, nothing happens
     const type = nodeOrType.getType().getBaseTypeOfLiteralType();
     const maybeSymbol = getSymbol(type);
-    return maybeSymbol?.getName() ?? type.getText();
+    return maybeSymbol?.getName() ?? type.getText(nodeOrType);
   }
   else {
     return getSymbol(nodeOrType)?.getName() ?? nodeOrType.getText();
@@ -699,6 +700,7 @@ const transactionIsMalformed: ErrorChecker = (node, fnDecl, _isLocal) => {
   ////////// Step 3: check if the database client used is unrecognized
 
   const clientType = getTypeName(typeArgs[0]);
+
   if (!ormClientInfoForRawSqlQueries.has(clientType)) {
     return ["transactionContextHasInvalidClientType", {clientType: clientType}];
   }
