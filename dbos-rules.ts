@@ -724,6 +724,7 @@ const transactionIsMalformed: ErrorChecker = (node, fnDecl, _isLocal) => {
     if (Node.isPropertyAccessExpression(parent) && parent.getChildCount() >= 3) {
       const left = parent.getChildAtIndex(0), right = parent.getChildAtIndex(2);
 
+      // If we find a direct usage of `ctxt.client`
       if (getSymbol(left) === transactionContextSymbol && right.getText() === "client") {
         foundDatabaseUsage = true;
         break;
@@ -733,6 +734,7 @@ const transactionIsMalformed: ErrorChecker = (node, fnDecl, _isLocal) => {
       const parentCall = ref.getFirstAncestorByKind(SyntaxKind.CallExpression);
       if (parentCall === Nothing) continue;
 
+      // If we call a helper function that is passed our transaction context (TODO: limit this to just other transactions)
       if (parentCall.getArguments().some((arg) => getSymbol(arg) === transactionContextSymbol)) {
         foundDatabaseUsage = true;
         break;
