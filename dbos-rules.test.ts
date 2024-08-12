@@ -82,12 +82,12 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
       $executeRawUnsafe(query: string, ...values: any[]) {}
     }
 
-    class PoolClient {
-      query(query: string, ...values: any[]) {}
+    class EntityManager {
+      query<T extends unknown[]>(query: string, parameters?: T) {}
     }
 
-    class TypeORMEntityManager {
-      query<T extends unknown[]>(query: string, parameters?: T) {}
+    class PoolClient {
+      query(query: string, ...values: any[]) {}
     }
 
     function Transaction(target?: any, key?: any, descriptor?: any): any {
@@ -348,15 +348,15 @@ const testSet: TestSet = [
         "PoolClient"
       ),
 
-      // Failure test #8 (testing `TypeORMEntityManager`)
+      // Failure test #8 (testing `EntityManager`)
       makeSqlInjectionFailureTest(`
         ctxt.client.query("foo" + (5).toString());
         `,
         Array(1).fill("sqlInjection"),
-        "TypeORMEntityManager"
+        "EntityManager"
       ),
 
-      // Failure test #9 (testing not using `TransactionContext`)
+      // Failure test #9 (testing not using `TransactionContext`, and malformed transactions)
       makeSqlInjectionFailureTest(`
         ctxt;
 
@@ -387,8 +387,33 @@ const testSet: TestSet = [
 
         // But this one does
         ctxt.client.raw(bob.baz2);
+
+        //////////
+
+        // Testing transactions without params
+        class Other2 {
+          @Transaction()
+          myInvalidTransactionWithoutParams() {}
+        }
+
+        // Testing transactions without a specified client type
+        class Other3 {
+          @Transaction()
+          myInvalidTransactionWithoutTypeParam(ctxt: TransactionContext) {}
+        }
+
+        class InvalidDatabaseClient {}
+
+        // Testing transactions with an invalid client type
+        class Other4 {
+          @Transaction()
+          myInvalidTransactionWithoutTypeParam(ctxt: TransactionContext<InvalidDatabaseClient>) {}
+        }
         `,
-        Array(1).fill("transactionDoesntUseTheDatabase")
+        [
+          "transactionDoesntUseTheDatabase", "transactionHasNoParameters",
+          "transactionContextHasNoTypeArguments", "transactionContextHasInvalidClientType"
+        ]
       ),
 
       // Failure test #10 (a simpler object test)
