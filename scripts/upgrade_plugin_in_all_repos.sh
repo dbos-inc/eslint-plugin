@@ -126,7 +126,7 @@ upgrade_repo() {
   git push --set-upstream origin "$branch_name"
 
   log "Finished upgrading '$repo_name'. Making a PR now..."
-  open "https://github.com/dbos-inc/$repo_name/pull/new/CaspianA1/$branch_name"
+  open "https://github.com/dbos-inc/$repo_name/pull/new/$branch_name"
 
   cd ..
 }
