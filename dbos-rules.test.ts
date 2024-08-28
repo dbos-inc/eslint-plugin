@@ -90,6 +90,10 @@ function makeSqlInjectionCode(code: string, sqlClient: string): string {
       query(query: string, ...values: any[]) {}
     }
 
+    class PgDatabase {
+      execute(query: string, ...values: any[]) {}
+    }
+
     function Transaction(target?: any, key?: any, descriptor?: any): any {
       return descriptor;
     }
@@ -244,7 +248,13 @@ const testSet: TestSet = [
       // Success test #9 (testing unsubstituted template literals)
       makeSqlInjectionSuccessTest(`
         ctxt.client.raw(\`foo\`);
-      `)
+      `),
+
+      // Success test #10 (testing Drizzle support)
+      makeSqlInjectionSuccessTest(`
+        ctxt.client.execute("foo");`,
+        "PgDatabase"
+      )
     ],
 
     [

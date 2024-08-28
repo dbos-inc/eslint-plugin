@@ -57,7 +57,7 @@ const ormClientInfoForRawSqlQueries: Map<string, string[]> = new Map([
   ["PrismaClient", ["$queryRawUnsafe", "$executeRawUnsafe"]], // For Prisma
   ["EntityManager", ["query"]], // For TypeORM
   ["PoolClient", ["query"]], // This is supported in `dbos-transact` (see `user_database.ts`, but not sure what ORM this corresponds to)
-  // ["PgDatabase", []], // For Drizzle (TODO: add full support for this)
+  ["PgDatabase", []], // For Drizzle (Currently we don't detect raw SQL calls for Drizzle)
 ]);
 
 const assignmentTokenKinds = new Set([
