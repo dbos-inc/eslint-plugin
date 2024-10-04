@@ -1,6 +1,7 @@
 import * as vitest from "vitest";
 import { RuleTester } from "@typescript-eslint/rule-tester";
 import { dbosStaticAnalysisRule } from "./dbos-rules";
+import Parser from "@typescript-eslint/parser";
 
 RuleTester.it = vitest.it;
 RuleTester.itOnly = vitest.it.only;
@@ -30,8 +31,10 @@ function doTest(title: string, successTests: SuccessTests, failureTests: Failure
 //////////
 
 const tester = new RuleTester({
-  parser: "@typescript-eslint/parser",
-  parserOptions: { project: "tsconfig.json" },
+  languageOptions: {
+    parser: Parser,
+    parserOptions: { project: "tsconfig.json" },
+  },
   defaultFilenames: { ts: "dbos-rules.test.ts", tsx: "this_file_doesnt_exist.tsx" }
 });
 
