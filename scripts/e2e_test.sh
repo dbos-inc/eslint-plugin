@@ -9,19 +9,18 @@ log() {
 
 # This list should be extended as more demos are written!
 directories=(
-  bank/bank-backend
+  typescript/bank/bank-backend
   # bank/bank-frontend
 
-  e-commerce/payment-backend
-  e-commerce/shop-backend
-  e-commerce/shop-frontend
+  typescript/e-commerce/payment-backend
+  typescript/e-commerce/shop-backend
+  typescript/e-commerce/shop-frontend
 
-  greeting-guestbook
-  shop-guide
-  tpcc
-  widget-fulfillment
-  widget-store
-  yky-social
+  typescript/greeting-guestbook
+  typescript/shop-guide
+  typescript/tpcc
+  typescript/widget-store
+  typescript/yky-social
 )
 
 demo_apps_dir="dbos-demo-apps"
