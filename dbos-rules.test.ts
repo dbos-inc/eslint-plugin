@@ -584,7 +584,7 @@ const testSet: TestSet = [
     )]
   ],
 
-  ["banned/not banned functions", [],
+  ["banned-not-banned-functions", [],
     [
       /* The secondary args here are the expected error
       IDs (which line up with the banned functions tested) */
@@ -599,7 +599,7 @@ const testSet: TestSet = [
     ]
   ],
 
-  ["allowed/not allowed awaits",
+  ["allowed-not-allowed-awaits",
     [
       // makeDeterminismSuccessTest("await ({}).foo();"), // TODO: probably make this fail in a proper way
       makeDeterminismSuccessTest("await new Set();"), // TODO: definitely make this not allowed (so ignore the `new`)
